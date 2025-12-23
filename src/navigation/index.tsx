@@ -3,16 +3,35 @@ import type { StaticParamList } from "@react-navigation/native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { Settings } from "./screens/Settings"
 import { Tuneo } from "./screens/Tuneo"
+import { Avatar } from "./screens/Avatar"
+import { AliBailianDemo } from "./screens/AliBailianDemo"
 import Colors from "@/colors"
 import { CloseButton } from "@/components/CloseButton"
 import { Platform } from "react-native"
 
 const RootStack = createNativeStackNavigator({
+  initialRouteName: "asr",
   screens: {
     Tuneo: {
       screen: Tuneo,
       options: {
         headerShown: false,
+      },
+    },
+    Avatar: {
+      screen: Avatar,
+      options: {
+        headerShown: false,
+      },
+    },
+    asr: {
+      screen: AliBailianDemo,
+      options: {
+        title: "Ali ASR & TTS Demo",
+        headerTitleStyle: { color: Colors.primary },
+        headerStyle: { backgroundColor: Colors.bgTitle },
+        headerTintColor: Colors.primary,
+        headerShadowVisible: false,
       },
     },
     Settings: {

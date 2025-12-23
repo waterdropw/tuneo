@@ -8,13 +8,13 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
 import kotlin.concurrent.thread
 
-val BUF_PER_SEC = 15
+val BUF_PER_SEC = 10
 
 class MicrophoneStreamModule : Module() {
 
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
-    private val sampleRate = 44100 // Default sample rate
+    private val sampleRate = 16000 // Default sample rate
     private val bufferSize = maxOf(
         sampleRate / BUF_PER_SEC,
         AudioRecord.getMinBufferSize(

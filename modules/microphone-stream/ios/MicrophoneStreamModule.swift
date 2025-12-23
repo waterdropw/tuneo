@@ -1,7 +1,7 @@
 import AVFoundation
 import ExpoModulesCore
 
-let BUF_PER_SEC = 15
+let BUF_PER_SEC = 10
 
 public class MicrophoneStreamModule: Module {
 
@@ -39,6 +39,7 @@ public class MicrophoneStreamModule: Module {
           DispatchQueue.main.async {
               do {
                   try self.audioSession.setCategory(.record, mode: .measurement, options: [])
+                  try self.audioSession.setPreferredSampleRate(16000.0) // default sample rate 16kHz
                   try self.audioSession.setActive(true)
 
                   let inputNode = self.audioEngine.inputNode
