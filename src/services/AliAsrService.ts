@@ -184,7 +184,7 @@ export class AliAsrService {
         
         this.socket.onmessage = (event) => {
           const message = JSON.parse(event.data);
-          console.log("[asr] Received message:", message);
+          // console.log("[asr] Received message:", message);
           
           if (message.header.event === "task-started") {
             this.isTaskStarted = true;
@@ -301,7 +301,7 @@ export class AliAsrService {
     if (!(audioData instanceof Int16Array)) {
       throw new TypeError("[asr] Audio data must be an Int16Array.");
     }
-    console.log('[asr] Sending audio data:',audioData.length, audioData[0], audioData[500], audioData[1000]);
+    // console.log('[asr] Sending audio data:',audioData.length, audioData[0], audioData[500], audioData[1000]);
     this.socket.send(audioData);
   }
   

@@ -91,6 +91,7 @@ export const AliBailianDemo = () => {
     asrService.setResultCallback((result) => {
       console.log("Received ASR result:", result)
       updateResultPairs(result)
+      
     })
     
     // Set up error callback for ASR service
@@ -135,6 +136,8 @@ export const AliBailianDemo = () => {
         case "task-finished":
           setTtsStatus("Audio synthesis finished")
           setIsTtsPlaying(false)
+          // Auto play audio when synthesis is finished
+          playAudioBuffer()
           break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
@@ -177,8 +180,6 @@ export const AliBailianDemo = () => {
   
   // Update result pairs helper function
   const updateResultPairs = (result: Record<string, string>) => {
-    console.log("Received result:", result);
-    
     // 将Record<string, string>转换为键值对数组
     const newPairs: { key: string; value: string }[] = Object.entries(result).map(([key, value]) => ({
       key,
@@ -397,7 +398,7 @@ export const AliBailianDemo = () => {
     <View style={styles.container}>
       {/* ASR Section */}
       <View style={styles.section}>
-        <Text style={styles.title}>ASR Results</Text>
+        <Text style={styles.title}>ASR Recognition</Text>
         
         <View style={styles.controls}>
           <Button
@@ -467,14 +468,6 @@ export const AliBailianDemo = () => {
             disabled={!isTtsPlaying}
           >
             <Text style={styles.buttonText}>Stop TTS</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.ttsButton, styles.playButton]}
-            onPress={playAudioBuffer}
-            disabled={playbackStatus === "playing"}
-          >
-            <Text style={styles.buttonText}>Play Audio</Text>
           </TouchableOpacity>
         </View>
         
