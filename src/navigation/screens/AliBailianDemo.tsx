@@ -1,33 +1,27 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useRef } from "react"
 import { View, Text, StyleSheet, Button, ScrollView } from "react-native"
 import { AudioModule } from "expo-audio"
 import Colors from "@/colors"
 import RequireMicAccess from "@/components/RequireMicAccess"
-import { useTranslation } from "@/configHooks"
-import { 
-  AudioProcessingPipelineService, 
-  PipelineState,
-  PipelineEventType
-} from "@/services/AudioProcessingPipelineService"
+import { AliAsrService, GummyConfig } from "@/services/AliAsrService"
+import { AudioDataProcessor } from "@/services/AudioDataProcessor"
 
 type MicrophoneAccess = "pending" | "granted" | "denied"
 
 export const AliBailianDemo = () => {
-  const t = useTranslation()
-  
   // Microphone access state
   const [micAccess, setMicAccess] = useState<MicrophoneAccess>("pending")
   
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false)
-  const [pipelineState, setPipelineState] = useState<PipelineState>("idle")
   
   // 1. 使用动态结果数组替代固定结果状态
   // 存储resultCallback返回的所有键值对
-  const [resultPairs, setResultPairs] = useState<Array<{ key: string; value: string }>>([])
+  const [resultPairs, setResultPairs] = useState<{ key: string; value: string }[]>([])
   
-  // Pipeline service instance
-  const [pipeline, setPipeline] = useState<AudioProcessingPipelineService | null>(null)
+  // Service instances (using useRef to avoid re-initialization on re-renders)
+  const asrServiceRef = useRef<AliAsrService | null>(null)
+  const audioProcessorRef = useRef<AudioDataProcessor | null>(null)
 
   // Request microphone permission
   useEffect(() => {
@@ -42,63 +36,47 @@ export const AliBailianDemo = () => {
     })()
   }, [])
   
-  // Initialize pipeline service
+  // Initialize ASR service and audio processor
   useEffect(() => {
     if (micAccess !== "granted") return
     
-    // Create pipeline instance
-    const audioPipeline = AudioProcessingPipelineService.getInstance({
-      enableLowLatency: true,
-      sourceLanguage: "zh",
-      targetLanguage: "en"
+    // Create ASR service instance with GummyConfig for translation
+    const config = new GummyConfig()
+    const asrService = new AliAsrService(config)
+    asrServiceRef.current = asrService
+    
+    // Create audio processor instance
+    const audioProcessor = AudioDataProcessor.getInstance()
+    audioProcessorRef.current = audioProcessor
+    
+    // Set up result callback for ASR service
+    asrService.setResultCallback((result) => {
+      console.log("Received ASR result:", result)
+      updateResultPairs(result)
     })
-    setPipeline(audioPipeline)
     
-    // Set up event listeners for pipeline events
-    const handleAsrResult = (data: any) => {
-      if (data && typeof data === 'object') {
-        updateResultPairs(data)
-      }
-    }
-    
-    const handleTranslationResult = (data: any) => {
-      if (data && data.translation) {
-        updateResultPairs({
-          translation: data.translation,
-          language: data.language
-        })
-      }
-    }
-    
-    const handleTtsResult = (data: any) => {
-      if (data && data.metadata) {
-        updateResultPairs({
-          tts: "Audio generated",
-          tts_metadata: JSON.stringify(data.metadata)
-        })
-      }
-    }
-    
-    const handlePipelineError = (data: any, error?: Error) => {
-      if (error) {
-        console.error("Pipeline error:", error)
-        updateResultPairs({
-          error: error.message
-        })
-      }
-    }
-    
-    // Add event listeners
-    audioPipeline.addEventListener("onAsrResult", handleAsrResult)
-    audioPipeline.addEventListener("onTranslationResult", handleTranslationResult)
-    audioPipeline.addEventListener("onTtsResult", handleTtsResult)
-    audioPipeline.addEventListener("onPipelineError", handlePipelineError)
+    // Set up error callback for ASR service
+    asrService.setErrorCallback((error) => {
+      console.error("ASR error:", error)
+      updateResultPairs({
+        error: error.message
+      })
+    })
     
     return () => {
       // Cleanup
-      console.log("Cleaning up pipeline")
-      audioPipeline.removeAllListeners()
-      audioPipeline.cleanup()
+      console.log("Cleaning up ASR service and audio processor")
+      if (audioProcessorRef.current) {
+        audioProcessorRef.current.stopProcessing()
+      }
+      if (asrServiceRef.current) {
+        // Ensure we close the connection if it's still open
+        try {
+          asrServiceRef.current.stop().catch(console.error)
+        } catch (error) {
+          console.error("Error stopping ASR service:", error)
+        }
+      }
     }
   }, [micAccess])
   
@@ -107,7 +85,7 @@ export const AliBailianDemo = () => {
     console.log("Received result:", result);
     
     // 将Record<string, string>转换为键值对数组
-    const newPairs: Array<{ key: string; value: string }> = Object.entries(result).map(([key, value]) => ({
+    const newPairs: { key: string; value: string }[] = Object.entries(result).map(([key, value]) => ({
       key,
       value
     }));
@@ -134,8 +112,11 @@ export const AliBailianDemo = () => {
   
   // 3. 更新开始处理函数，重置动态结果数组
   const handleStartProcessing = async () => {
-    if (!pipeline) {
-      console.error("Pipeline not initialized")
+    const asrService = asrServiceRef.current
+    const audioProcessor = audioProcessorRef.current
+    
+    if (!asrService || !audioProcessor) {
+      console.error("ASR service or audio processor not initialized")
       return
     }
     
@@ -144,39 +125,67 @@ export const AliBailianDemo = () => {
     setResultPairs([])
     
     try {
-      // Start the pipeline
-      console.log("Starting audio processing pipeline...")
-      await pipeline.startPipeline()
-      setPipelineState(pipeline.getState())
-      console.log("Audio processing pipeline started successfully")
+      // Connect to ASR service
+      console.log("Connecting to ASR service...")
+      await asrService.connect()
+      console.log("ASR service connected successfully")
+      
+      // Start audio processing with callback to send audio to ASR service
+      audioProcessor.startProcessing((processedData) => {
+        if (processedData && processedData.data && asrService.isReady()) {
+          try {
+            asrService.sendAudio(processedData.data)
+          } catch (error) {
+            console.error("Error sending audio data:", error)
+            // Update result pairs with error
+            updateResultPairs({
+              error: `Error sending audio data: ${error instanceof Error ? error.message : String(error)}`
+            })
+          }
+        }
+      })
+      
+      console.log("Audio processing started successfully")
     } catch (error) {
-      console.error("Failed to start pipeline:", error)
+      console.error("Failed to start processing:", error)
       setIsProcessing(false)
-      setPipelineState("error")
+      updateResultPairs({
+        error: `Failed to start processing: ${error instanceof Error ? error.message : String(error)}`
+      })
     }
   }
   
   // Stop processing
   const handleStopProcessing = async () => {
-    if (!pipeline) return
+    const asrService = asrServiceRef.current
+    const audioProcessor = audioProcessorRef.current
+    
+    if (!asrService || !audioProcessor) return
     
     console.log("Stopping processing")
     setIsProcessing(false)
     
     try {
-      // Stop the pipeline
-      await pipeline.stopPipeline()
-      setPipelineState(pipeline.getState())
+      // Stop audio processing first
+      audioProcessor.stopProcessing()
+      console.log("Audio processing stopped")
+      
+      // Then stop ASR service
+      await asrService.stop()
+      console.log("ASR service stopped")
+      
     } catch (error) {
-      console.error("Failed to stop pipeline:", error)
-      setPipelineState("error")
+      console.error("Failed to stop processing:", error)
+      updateResultPairs({
+        error: `Failed to stop processing: ${error instanceof Error ? error.message : String(error)}`
+      })
     }
   }
   
   // 4. 实现动态View创建与布局
   return micAccess === "granted" ? (
     <View style={styles.container}>
-      <Text style={styles.title}>识别及翻译内容</Text>
+      <Text style={styles.title}>results</Text>
       
       <View style={styles.controls}>
         <Button

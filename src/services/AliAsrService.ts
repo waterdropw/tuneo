@@ -114,27 +114,6 @@ export class GummyConfig implements AsrConfig {
   };
 }
 
-/**
- * 实时语音生成模型配置
- */
-// export class CosyvoiceConfig implements PayloadConfig {
-//   model: "cosyvoice-v1" | "cosyvoice-v2" | "cosyvoice-v3-flash" | "cosyvoice-v3-plus" = "cosyvoice-v3-flash";
-//   task_group: string = "audio";
-//   task: string = "tts";
-//   function: string = "SpeechSynthesizer";
-//   input: any = {};
-//   parameters: {
-//     format: "pcm" | "wav" | "mp3" | "opus" | "speex" | "aac" | "amr";        // 音频格式，可选值为[pcm, wav, mp3, opus, speex, aac, amr]，默认为pcm
-//     sample_rate: 16000;   // 采样率，默认为16000，即为16kHz
-//     voice?: string; // 音色，默认值为zhangsan
-//     speed?: number; // 语速，默认值为1.0，范围为0.5至2.0
-//     volume?: number; // 音量，默认值为1.0，范围为0.5至2.0
-//     text?: string; // 输入文本，必填项
-//     punctuation_prediction_enabled?: boolean; // 设置是否在识别结果中自动添加标点。默认值：true
-//     inverse_text_normalization_enabled?: boolean; // 设置是否开启ITN（Inverse Text Normalization，逆文本正则化）。默认值：true。该参数仅在模型为v2及更高版本时生效
-//   }
-// }
-
 
 /**
  * 实时语音识别处理器
