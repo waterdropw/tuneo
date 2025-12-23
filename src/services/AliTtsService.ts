@@ -55,8 +55,8 @@ export class CosyvoiceConfig implements TtsConfig {
   } = {
     text_type: "plain",
     voice: "longanhuan",
-    format: "pcm",
-    sample_rate: 16000,
+    format: "mp3",
+    sample_rate: 22050,
     volume: 50,
     rate: 1.0,
     pitch: 1.0,
