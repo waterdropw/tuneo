@@ -179,7 +179,7 @@ export class AliTtsService {
             // 处理JSON事件
             try {
               const message = JSON.parse(event.data);
-              console.log("[tts] Received TTS message:", message);
+              // console.log("[tts] Received TTS message:", message);
               this.handleTextMessage(message);
             } catch (error) {
               console.error("[tts] Failed to parse TTS message:", error, "Raw message:", event.data);
@@ -251,7 +251,7 @@ export class AliTtsService {
       // 通知音频结束
       this.notifyAudioEnd();
     } else if (message.header?.event === "result-generated") {
-      console.log('[tts] Received result-generated event:', message.payload);
+      // console.log('[tts] Received result-generated event:', message.payload);
       // 处理结果生成事件（如果有）
     } else if (message.header?.event === "error") {
       console.error('[tts] Received error event:', message.payload);

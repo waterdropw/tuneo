@@ -1,20 +1,22 @@
 import MicrophoneStreamModule, { AudioBuffer } from "@/../modules/microphone-stream"
 
 /**
- * 音频数据处理器类
+ * 音频录制及数据处理
  * 负责接收MicrophoneStreamModule的onAudioBuffer数据，进行格式转换、预处理和特征提取
  */
-export class AudioDataProcessor {
-  private static instance: AudioDataProcessor | null = null;
+
+
+export class AudioSource {
+  private static instance: AudioSource | null = null;
   private isProcessing: boolean = false;
   private audioBufferHandler: ((processedData: any) => void) | null = null;
   
   // 单例模式，确保全局只有一个实例
-  public static getInstance(): AudioDataProcessor {
-    if (!AudioDataProcessor.instance) {
-      AudioDataProcessor.instance = new AudioDataProcessor();
+  public static getInstance(): AudioSource {
+    if (!AudioSource.instance) {
+      AudioSource.instance = new AudioSource();
     }
-    return AudioDataProcessor.instance;
+    return AudioSource.instance;
   }
   
   private constructor() {
@@ -40,14 +42,6 @@ export class AudioDataProcessor {
     // 获取并验证实际采样率
     const actualSampleRate = MicrophoneStreamModule.getSampleRate();
     console.log(`Microphone actual sample rate: ${actualSampleRate} Hz`);
-    
-    // 验证采样率是否为16000 Hz（gummy-realtime-v1模型要求）
-    if (actualSampleRate !== 16000) {
-      console.warn(`WARNING: Microphone sample rate (${actualSampleRate} Hz) does not match the required 16000 Hz for gummy-realtime-v1 model.`);
-      console.warn(`This may cause recognition to fail. Please check microphone settings.`);
-    } else {
-      console.log("✓ Sample rate matches required 16000 Hz for the model.");
-    }
     
     // 获取缓冲区每秒数量
     console.log(`Buffers per second: ${MicrophoneStreamModule.BUF_PER_SEC}`);
@@ -98,7 +92,7 @@ export class AudioDataProcessor {
       const int16Array = this.floatToInt16(buffer.samples);
       
       // 2. 预处理：对音频数据进行降噪、滤波等处理
-      const preprocessedData = this.preprocessAudio(int16Array);
+      // const preprocessedData = this.preprocessAudio(int16Array);
       
       // 3. 特征提取：提取音频的时域和频域特征
       // const features = this.extractFeatures(preprocessedData);

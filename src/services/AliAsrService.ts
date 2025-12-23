@@ -199,7 +199,7 @@ export class AliAsrService {
               this.resolveTaskFinished();
             }
           } else if (message.header.event === 'result-generated') {
-            console.log('[asr] Received result-generated:', JSON.stringify(message.payload));
+            // console.log('[asr] Received result-generated:', JSON.stringify(message.payload));
 
             // Handle different response formats based on model
             let asrResult = "";
@@ -263,9 +263,9 @@ export class AliAsrService {
             }
             
             // Log if no results were extracted but we received a result-generated event
-            if (!asrResult && Object.keys(translations).length === 0) {
-              console.warn('[asr] No results extracted from result-generated event:', message.payload);
-            }
+            // if (!asrResult && Object.keys(translations).length === 0) {
+            //   console.warn('[asr] No results extracted from result-generated event:', message.payload);
+            // }
           }
         };
         

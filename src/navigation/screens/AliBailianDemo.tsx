@@ -14,14 +14,14 @@
  * - TTS Section: 处理文本转语音功能，包括双缓冲区状态显示
  */
 
-import React, { useEffect, useState, useRef } from "react"
-import { View, Text, StyleSheet, Button, ScrollView, TextInput, TouchableOpacity } from "react-native"
+import React, { useEffect, useState, useRef, useCallback } from "react"
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity } from "react-native"
 import { AudioModule } from "expo-audio"
 import Colors from "@/colors"
 import RequireMicAccess from "@/components/RequireMicAccess"
 import { AliAsrService, GummyConfig } from "@/services/AliAsrService"
 import { AliTtsService, CosyvoiceConfig } from "@/services/AliTtsService"
-import { AudioDataProcessor } from "@/services/AudioDataProcessor"
+import { AudioSource } from "@/services/AudioSource"
 import * as FileSystem from 'expo-file-system'
 import Sound from 'react-native-sound'
 
@@ -37,7 +37,7 @@ export const AliBailianDemo = () => {
   
   // TTS state
   const [ttsText, setTtsText] = useState("")           // 用户输入的待合成文本
-  const [isTtsPlaying, setIsTtsPlaying] = useState(false) // TTS合成状态
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false) // 音频播放状态
   const [ttsStatus, setTtsStatus] = useState("")       // TTS状态信息
   
   // Audio playback state
@@ -45,11 +45,18 @@ export const AliBailianDemo = () => {
   
   // 存储ASR服务返回的结果键值对
   const [resultPairs, setResultPairs] = useState<{ key: string; value: string }[]>([])
+  // 存储最新的ASR识别文本，用于自动TTS
+  const [latestAsrText, setLatestAsrText] = useState("")
+  // 存储已处理的结果对哈希，避免重复触发TTS
+  const [processedResultHash, setProcessedResultHash] = useState("")
+  
+  // ScrollView ref for auto-scrolling to latest results
+  const scrollViewRef = useRef<ScrollView>(null)
   
   // Service instances (using useRef to avoid re-initialization on re-renders)
   const asrServiceRef = useRef<AliAsrService | null>(null)           // ASR服务实例
   const ttsServiceRef = useRef<AliTtsService | null>(null)           // TTS服务实例
-  const audioProcessorRef = useRef<AudioDataProcessor | null>(null)  // 音频处理器实例
+  const audioProcessorRef = useRef<AudioSource | null>(null)         // 音频处理器实例
   
   // TTS audio data buffer
   const audioDataBuffer = useRef<Uint8Array[]>([])
@@ -84,14 +91,32 @@ export const AliBailianDemo = () => {
     ttsServiceRef.current = ttsService
     
     // Create audio processor instance
-    const audioProcessor = AudioDataProcessor.getInstance()
+    const audioProcessor = AudioSource.getInstance()
     audioProcessorRef.current = audioProcessor
     
     // Set up result callback for ASR service
     asrService.setResultCallback((result) => {
       console.log("Received ASR result:", result)
-      updateResultPairs(result)
       
+      // Ensure result is a valid object
+      if (typeof result === 'object' && result !== null) {
+        updateResultPairs(result)
+        
+        // Extract the recognized text from the result
+        const textResult = Object.values(result).find(value => value.trim()) || "";
+        if (textResult.trim()) {
+          // 新结果拼接到旧结果后面，形成完整内容
+          setLatestAsrText(prevText => {
+            // 检查是否已经包含当前结果，避免重复拼接
+            if (prevText.includes(textResult)) {
+              return prevText;
+            }
+            return prevText + textResult;
+          });
+        }
+      } else {
+        console.error("Invalid ASR result format:", result)
+      }
     })
     
     // Set up error callback for ASR service
@@ -120,7 +145,7 @@ export const AliBailianDemo = () => {
     ttsService.setErrorCallback((error) => {
       console.error("TTS error:", error)
       setTtsStatus(`TTS Error: ${error.message}`)
-      setIsTtsPlaying(false)
+      setIsAudioPlaying(false)
     })
     
     // Set up event callback for TTS service
@@ -129,19 +154,19 @@ export const AliBailianDemo = () => {
       switch (event) {
         case "task-started":
           setTtsStatus("Audio synthesis started")
-          // Reset audio buffer and status
+          // Reset audio buffer and status - 确保在开始合成时清空缓冲区
           audioDataBuffer.current = []
           isAudioComplete.current = false
           break
         case "task-finished":
           setTtsStatus("Audio synthesis finished")
-          setIsTtsPlaying(false)
+          setIsAudioPlaying(false)
           // Auto play audio when synthesis is finished
           playAudioBuffer()
           break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
-          setIsTtsPlaying(false)
+          setIsAudioPlaying(false)
           break
       }
     })
@@ -178,33 +203,63 @@ export const AliBailianDemo = () => {
     }
   }, [micAccess])
   
-  // Update result pairs helper function
-  const updateResultPairs = (result: Record<string, string>) => {
+  // Update result pairs helper function - 使用useCallback确保引用稳定
+  const updateResultPairs = useCallback((result: Record<string, string>) => {
     // 将Record<string, string>转换为键值对数组
     const newPairs: { key: string; value: string }[] = Object.entries(result).map(([key, value]) => ({
       key,
       value
     }));
     
-    // 更新结果数组 - 保留现有结果并添加新结果
-    setResultPairs(prevPairs => {
-      // 创建一个映射，用于快速查找现有键
-      const existingKeys = new Map(prevPairs.map(pair => [pair.key, pair.value]));
+    // 直接设置最新结果，完全丢弃所有旧结果
+    setResultPairs(newPairs);
+  }, [])
+  
+  // Auto trigger TTS when ASR result is updated
+  useEffect(() => {
+    const triggerTTS = async () => {
+      const ttsService = ttsServiceRef.current;
+      if (!ttsService) {
+        console.error("TTS service not initialized");
+        return;
+      }
+      if (!resultPairs.length || resultPairs.length < 2) {
+        console.error("No ASR result to synthesize");
+        return;
+      }
       
-      // 合并新结果，更新现有键或添加新键
-      newPairs.forEach(pair => {
-        // 对于每个键，将新值追加到现有值后面
-        const existingValue = existingKeys.get(pair.key) || "";
-        existingKeys.set(pair.key, `${existingValue}${pair.value}`);
-      });
+      // Generate a hash of the result pairs to check if we've already processed this result
+      const resultHash = JSON.stringify(resultPairs);
       
-      // 转换回数组
-      return Array.from(existingKeys.entries()).map(([key, value]) => ({
-        key,
-        value
-      }));
-    });
-  }
+      // Check if we've already processed this result
+      if (resultHash === processedResultHash) {
+        console.log("Skipping duplicate TTS trigger for the same result");
+        return;
+      }
+      
+      setTtsStatus("Connecting to TTS service...");
+      
+      try {
+        // Connect to TTS service
+        await ttsService.connect();
+        console.log("TTS service connected successfully for auto-trigger");
+        
+        // Send resultPairs[1] text for synthesis, if empty send resultPairs[0]
+        const textToSynthesize = resultPairs[1].value.trim();
+        ttsService.sendText(textToSynthesize, true);
+        console.log("ASR text sent for synthesis:", textToSynthesize);
+        
+        // Update the processed hash to avoid duplicate triggers
+        setProcessedResultHash(resultHash);
+        
+      } catch (error) {
+        console.error("Failed to auto-trigger TTS synthesis:", error);
+        setTtsStatus(`Failed to auto-trigger TTS: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    
+    triggerTTS();
+  }, [resultPairs]);
   
   // 3. 更新开始处理函数，重置动态结果数组
   const handleStartProcessing = async () => {
@@ -219,6 +274,10 @@ export const AliBailianDemo = () => {
     setIsProcessing(true)
     // 重置动态结果数组
     setResultPairs([])
+    // 重置latestAsrText，开始新的会话
+    setLatestAsrText("")
+    // 重置已处理结果哈希，允许新结果触发TTS
+    setProcessedResultHash("")
     
     try {
       // Connect to ASR service
@@ -228,15 +287,11 @@ export const AliBailianDemo = () => {
       
       // Start audio processing with callback to send audio to ASR service
       audioProcessor.startProcessing((processedData) => {
-        if (processedData && processedData.data && asrService.isReady()) {
+        if (processedData && processedData.data && asrService.isReady() && !isAudioPlaying) {
           try {
             asrService.sendAudio(processedData.data)
           } catch (error) {
             console.error("Error sending audio data:", error)
-            // Update result pairs with error
-            updateResultPairs({
-              error: `Error sending audio data: ${error instanceof Error ? error.message : String(error)}`
-            })
           }
         }
       })
@@ -292,7 +347,6 @@ export const AliBailianDemo = () => {
       return
     }
     
-    setIsTtsPlaying(true)
     setTtsStatus("Connecting to TTS service...")
     
     try {
@@ -307,7 +361,6 @@ export const AliBailianDemo = () => {
     } catch (error) {
       console.error("Failed to start TTS synthesis:", error)
       setTtsStatus(`Failed to start TTS synthesis: ${error instanceof Error ? error.message : String(error)}`)
-      setIsTtsPlaying(false)
     }
   }
   
@@ -328,7 +381,7 @@ export const AliBailianDemo = () => {
         soundRef.current.release()
         soundRef.current = null
       }
-      setIsTtsPlaying(false)
+      setIsAudioPlaying(false)
       setTtsStatus("TTS synthesis stopped")
       setPlaybackStatus("stopped")
     } catch (error) {
@@ -337,13 +390,16 @@ export const AliBailianDemo = () => {
     }
   }
   
-  // Play audio from buffer
-  const playAudioBuffer = async () => {
+  // Play audio from buffer - 使用useCallback确保引用稳定
+  const playAudioBuffer = useCallback(async () => {
     if (audioDataBuffer.current.length === 0) {
       setTtsStatus("No audio data to play")
       return
     }
     
+    // 1. 播放前停止ASR服务
+    setIsAudioPlaying(true)
+
     setTtsStatus("Playing audio...")
     setPlaybackStatus("playing")
     
@@ -374,6 +430,8 @@ export const AliBailianDemo = () => {
           console.log('加载失败', error)
           setTtsStatus(`Audio playback error: ${error.message}`)
           setPlaybackStatus("stopped")
+          // 播放失败时也尝试重新启动ASR
+          setIsAudioPlaying(false)
           return
         }
         sound.play(() => {
@@ -381,6 +439,8 @@ export const AliBailianDemo = () => {
           soundRef.current = null
           setPlaybackStatus("stopped")
           setTtsStatus("Audio playback completed")
+          // 2. 播放结束后重新启动ASR服务
+          setIsAudioPlaying(false)
         })
       })
       
@@ -390,8 +450,10 @@ export const AliBailianDemo = () => {
       console.error("Failed to play audio:", error)
       setTtsStatus(`Audio playback error: ${error instanceof Error ? error.message : String(error)}`)
       setPlaybackStatus("stopped")
+      // 播放失败时也尝试重新启动ASR
+      setIsAudioPlaying(false)
     }
-  }
+  }, [])
   
   // 4. 实现动态View创建与布局
   return micAccess === "granted" ? (
@@ -401,40 +463,41 @@ export const AliBailianDemo = () => {
         <Text style={styles.title}>ASR Recognition</Text>
         
         <View style={styles.controls}>
-          <Button
-            title={isProcessing ? "Stop ASR" : "Start ASR"}
+          <TouchableOpacity
+            style={[styles.asrButton, isProcessing ? styles.stopButton : styles.startButton]}
             onPress={isProcessing ? handleStopProcessing : handleStartProcessing}
-            color={isProcessing ? Colors.secondary : Colors.primary}
-          />
+          >
+            <Text style={styles.buttonText}>
+              {isProcessing ? "Stop ASR" : "Start ASR"}
+            </Text>
+          </TouchableOpacity>
         </View>
         
-        {/* 可滑动的外层容器 - 使用ScrollView */}
-        <ScrollView 
-          style={styles.scrollContainer}
-          showsVerticalScrollIndicator={true}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {/* 动态创建的结果View */}
-          {resultPairs.length > 0 ? (
-            resultPairs.map((pair, index) => (
-              <View key={`${pair.key}-${index}`} style={styles.dynamicResultContainer}>
-                {/* 键(key)显示 */}
-                <Text style={styles.resultKey}>{pair.key.toUpperCase()}</Text>
-                {/* 值(value)显示 */}
-                <View style={styles.resultValueContainer}>
-                  <Text style={styles.resultValue}>{pair.value || "No content"}</Text>
-                </View>
-              </View>
-            ))
-          ) : (
-            /* 空结果处理 */
-            <View style={styles.emptyResultsContainer}>
-              <Text style={styles.emptyResultsText}>
-                {isProcessing ? "Processing audio..." : "No results yet. Click 'Start ASR' to begin."}
-              </Text>
+        {/* 固定永久显示的文本框，内容可上下滚动 */}
+        <View style={styles.resultTextContainer}>
+          {/* 标题 */}
+          <Text style={styles.resultTextTitle}>ASR Recognition Result</Text>
+          {/* 可滚动的文本内容 */}
+          <ScrollView 
+            style={styles.resultTextScroll} 
+            showsVerticalScrollIndicator={true}
+            // 自动滚动到底部，显示最新结果
+            onContentSizeChange={(width, height) => {
+              scrollViewRef.current?.scrollToEnd({ animated: true })
+            }}
+          >
+            {/* 显示最新结果 */}
+            <Text style={styles.resultTextContent}>
+              {latestAsrText.trim() || (isProcessing ? "Processing audio..." : "No results yet. Click 'Start ASR' to begin.")}
+            </Text>
+          </ScrollView>
+          {/* 自动TTS提示 */}
+          {latestAsrText.trim() && (
+            <View style={styles.autoTtsIndicator}>
+              <Text style={styles.autoTtsText}>🔊 Auto TTS triggered</Text>
             </View>
           )}
-        </ScrollView>
+        </View>
       </View>
       
       {/* TTS Section */}
@@ -457,7 +520,7 @@ export const AliBailianDemo = () => {
           <TouchableOpacity
             style={[styles.ttsButton, styles.startButton]}
             onPress={handleTtsSynthesis}
-            disabled={isTtsPlaying}
+            disabled={isAudioPlaying}
           >
             <Text style={styles.buttonText}>Start TTS</Text>
           </TouchableOpacity>
@@ -465,7 +528,7 @@ export const AliBailianDemo = () => {
           <TouchableOpacity
             style={[styles.ttsButton, styles.stopButton]}
             onPress={handleTtsStop}
-            disabled={!isTtsPlaying}
+            disabled={!isAudioPlaying}
           >
             <Text style={styles.buttonText}>Stop TTS</Text>
           </TouchableOpacity>
@@ -473,10 +536,10 @@ export const AliBailianDemo = () => {
         
         {/* Status Indicators */}
         <View style={styles.statusIndicators}>
-          {/* TTS Status */}
+          {/* Audio Status */}
           <View style={styles.statusIndicatorItem}>
             <View style={[styles.statusDot, {
-              backgroundColor: isTtsPlaying ? Colors.primary : Colors.secondary
+              backgroundColor: isAudioPlaying ? Colors.primary : Colors.secondary
             }]} />
             <Text style={styles.statusLabel}>TTS:</Text>
             <Text style={styles.statusText}>{ttsStatus || "Ready"}</Text>
@@ -587,12 +650,57 @@ const styles = StyleSheet.create({
   
   // 值(value)文本样式
   resultValue: {
-    color: Colors.secondary,
-    fontSize: 16,
-    lineHeight: 22,
+    color: Colors.primary,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: "500",
     
     // 处理超长文本
     flexWrap: "wrap",
+    textAlign: "left"
+  },
+  
+  // 自动TTS提示样式
+  autoTtsIndicator: {
+    marginTop: 8,
+    padding: 6,
+    backgroundColor: Colors.ok + "30",
+    borderRadius: 4,
+    alignSelf: "flex-start"
+  },
+  autoTtsText: {
+    color: Colors.ok,
+    fontSize: 12,
+    fontWeight: "bold"
+  },
+  
+  // 固定结果文本框样式
+  resultTextContainer: {
+    backgroundColor: Colors.bgActive,
+    borderRadius: 10,
+    padding: 15,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    minHeight: 200
+  },
+  resultTextTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: Colors.primary,
+    marginBottom: 10
+  },
+  resultTextScroll: {
+    maxHeight: 100,
+    marginBottom: 10
+  },
+  resultTextContent: {
+    color: Colors.primary,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: "500",
     textAlign: "left"
   },
   
@@ -646,6 +754,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center"
+  },
+  asrButton: {
+    padding: 15,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 150
   },
   startButton: {
     backgroundColor: Colors.primary
