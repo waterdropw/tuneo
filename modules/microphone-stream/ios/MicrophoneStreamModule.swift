@@ -38,7 +38,7 @@ public class MicrophoneStreamModule: Module {
           print("Configuring audioSession")
           DispatchQueue.main.async {
               do {
-                  try self.audioSession.setCategory(.record, mode: .measurement, options: [])
+                  try self.audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
                   try self.audioSession.setPreferredSampleRate(16000.0) // default sample rate 16kHz
                   try self.audioSession.setActive(true)
 
@@ -76,7 +76,7 @@ public class MicrophoneStreamModule: Module {
   private func stopRecording() {
     audioEngine.inputNode.removeTap(onBus: 0)
     audioEngine.stop()
-    try? AVAudioSession.sharedInstance().setActive(false)
+    // Don't deactivate the audio session to allow for immediate playback
     audioBufferHandler = nil
   }
 }

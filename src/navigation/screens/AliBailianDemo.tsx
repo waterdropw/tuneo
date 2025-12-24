@@ -103,6 +103,7 @@ export const AliBailianDemo = () => {
   const audioDataBuffer = useRef<Uint8Array[]>([])
   const isAudioComplete = useRef(false)
   const soundRef = useRef<Sound | null>(null)
+  const isPlaying = useRef(false)
   
   // Update result pairs helper function - 使用useCallback确保引用稳定
   const updateResultPairs = useCallback((result: Record<string, string>) => {
@@ -124,6 +125,7 @@ export const AliBailianDemo = () => {
     }
     
     setPlaybackStatus("playing")
+    isPlaying.current = true
     
     try {
       // Combine audio data chunks
@@ -138,13 +140,18 @@ export const AliBailianDemo = () => {
       // Convert Uint8Array to base64 string
       const base64Data = btoa(String.fromCharCode(...combinedBuffer))
       
-      // Write to temporary file and play
+      // Write to temporary file
       const path = `${FileSystem.cacheDirectory}temp_audio.mp3`
       
-      // Write to temporary file
       await FileSystem.writeAsStringAsync(path, base64Data, {
         encoding: FileSystem.EncodingType.Base64
       })
+      
+      // If sound is already playing, stop it first
+      if (soundRef.current) {
+        soundRef.current.stop()
+        soundRef.current.release()
+      }
       
       // Play the file
       const sound = new Sound(path, '', (error) => {
@@ -152,13 +159,17 @@ export const AliBailianDemo = () => {
           console.log('加载失败', error)
           setIsTtsProcessing(false)
           setPlaybackStatus("stopped")
+          isPlaying.current = false
           return
         }
         sound.play(() => {
           sound.release()
           soundRef.current = null
-          setPlaybackStatus("stopped")
-          setIsTtsProcessing(false)
+          if (isAudioComplete.current) {
+            setPlaybackStatus("stopped")
+            setIsTtsProcessing(false)
+            isPlaying.current = false
+          }
         })
       })
       
@@ -167,6 +178,7 @@ export const AliBailianDemo = () => {
     } catch (error) {
       console.error("Failed to play audio:", error)
       setPlaybackStatus("stopped")
+      isPlaying.current = false
     }
   }, [])
 
@@ -252,9 +264,16 @@ export const AliBailianDemo = () => {
       if (audioData) {
         // Convert ArrayBuffer to Uint8Array and add to buffer
         audioDataBuffer.current.push(new Uint8Array(audioData))
+        
+        // If we have enough data and not already playing, start playing incrementally
+        if (audioDataBuffer.current.length >= 2 && !isPlaying.current) {
+          playAudioBuffer()
+        }
       } else {
         // Audio stream ended
         isAudioComplete.current = true
+        // Play the final complete audio
+        playAudioBuffer()
       }
     })
     

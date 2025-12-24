@@ -39,10 +39,6 @@ export class AudioSource {
     // 开始录音
     MicrophoneStreamModule.startRecording();
     
-    // 获取并验证实际采样率
-    const actualSampleRate = MicrophoneStreamModule.getSampleRate();
-    console.log(`Microphone actual sample rate: ${actualSampleRate} Hz`);
-    
     // 获取缓冲区每秒数量
     console.log(`Buffers per second: ${MicrophoneStreamModule.BUF_PER_SEC}`);
     

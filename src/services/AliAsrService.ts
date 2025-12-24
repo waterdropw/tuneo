@@ -4,6 +4,8 @@
  * 参考实现：https://github.com/aliyun/alibabacloud-bailian-speech-demo/blob/master/samples/gallery/paraformer-realtime-js/paraformer_realtime_api.js
  */
 
+import MicrophoneStreamModule from "../../modules/microphone-stream";
+
 // 私有：定义WebSocket消息类型
 interface WebSocketMessage {
   header: {
@@ -58,7 +60,7 @@ export class FunConfig implements AsrConfig {
   input: any = {};
   parameters: {
     format: "pcm" | "wav" | "mp3" | "opus" | "speex" | "aac" | "amr";        // 音频格式，可选值为[pcm, wav, mp3, opus, speex, aac, amr]，默认为pcm
-    sample_rate: 16000;   // 采样率，默认为16000，即为16kHz
+    sample_rate: 16000 | 48000;   // 采样率，默认为16000，即为16kHz
     heartbeat?: boolean; // 是否开启心跳功能。默认值：false
     vocabulary_id?: string; // 热词ID。默认不设置。
     semantic_punctuation_enabled?: boolean; // 是否开启语义断句。默认值：false
@@ -171,6 +173,10 @@ export class AliAsrService {
     }
     this.wsUrl = `wss://dashscope.aliyuncs.com/api-ws/v1/inference?api_key=${apiKey}`;
     this.config = config;
+    // 获取并验证实际采样率
+    const actualSampleRate = MicrophoneStreamModule.getSampleRate();
+    console.log(`Microphone actual sample rate: ${actualSampleRate} Hz`);
+    this.config.parameters.sample_rate = actualSampleRate;
   }
   
   /**
