@@ -41,6 +41,8 @@ export const AliBailianDemo = () => {
   const [ttsText, setTtsText] = useState("")           // 用户输入的待合成文本
   const [isTtsProcessing, setIsTtsProcessing] = useState(false) // TTS处理状态
   const [ttsStatus, setTtsStatus] = useState("")       // TTS状态信息
+  // TTS Section collapse state
+  const [isTtsCollapsed, setIsTtsCollapsed] = useState(true) // 默认折叠状态
   
   // Audio playback state
   const [playbackStatus, setPlaybackStatus] = useState("stopped") // "stopped", "playing", "paused"
@@ -562,72 +564,89 @@ export const AliBailianDemo = () => {
       
       {/* TTS Section */}
       <View style={styles.section}>
-        {/* TTS Title with Language and Voice Selection */}
-        <View style={styles.titleWithLanguage}>
-          <Text style={styles.title}>TTS</Text>
-          
-          {/* TTS Language Selection */}
-          <View style={styles.titlePickerContainer}>
-            <Picker
-              actions={fangyanOptions}
-              onSelect={(lang) => setDialect(lang)}
-              value={dialect}
-            >
-              <TouchableOpacity style={styles.titleLanguageButton}>
-                <Text style={styles.titleLanguageButtonText}>
-                  {fangyanOptions.find(lang => lang.id === dialect)?.title || dialect}
-                </Text>
-              </TouchableOpacity>
-            </Picker>
+        {/* TTS Collapsible Header */}
+        <TouchableOpacity 
+          style={styles.collapsibleHeader} 
+          onPress={() => setIsTtsCollapsed(!isTtsCollapsed)}
+        >
+          <View style={styles.titleWithLanguage}>
+            <Text style={styles.title}>TTS</Text>
+            
+            {/* TTS Language Selection */}
+            <View style={styles.titlePickerContainer}>
+              <Picker
+                actions={fangyanOptions}
+                onSelect={(lang) => setDialect(lang)}
+                value={dialect}
+              >
+                <TouchableOpacity style={styles.titleLanguageButton}>
+                  <Text style={styles.titleLanguageButtonText}>
+                    {fangyanOptions.find(lang => lang.id === dialect)?.title || dialect}
+                  </Text>
+                </TouchableOpacity>
+              </Picker>
+            </View>
+            
+            {/* TTS Voice Selection */}
+            <View style={styles.titlePickerContainer}>
+              <Picker
+                actions={yinseOptions}
+                onSelect={(v) => setVoice(v)}
+                value={voice}
+              >
+                <TouchableOpacity style={styles.titleLanguageButton}>
+                  <Text style={styles.titleLanguageButtonText}>
+                    {yinseOptions.find(v => v.id === voice)?.title || voice}
+                  </Text>
+                </TouchableOpacity>
+              </Picker>
+            </View>
           </View>
           
-          {/* TTS Voice Selection */}
-          <View style={styles.titlePickerContainer}>
-            <Picker
-              actions={yinseOptions}
-              onSelect={(v) => setVoice(v)}
-              value={voice}
-            >
-              <TouchableOpacity style={styles.titleLanguageButton}>
-                <Text style={styles.titleLanguageButtonText}>
-                  {yinseOptions.find(v => v.id === voice)?.title || voice}
-                </Text>
-              </TouchableOpacity>
-            </Picker>
+          {/* Collapse/Expand Icon */}
+          <View style={styles.collapseIconContainer}>
+            <Text style={styles.collapseIcon}>
+              {isTtsCollapsed ? "▼" : "▲"}
+            </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         
-        {/* Text Input for TTS */}
-        <TextInput
-          style={styles.textInput}
-          placeholder="Enter text to synthesize"
-          value={ttsText}
-          onChangeText={setTtsText}
-          multiline
-          numberOfLines={3}
-          placeholderTextColor={Colors.secondary}
-        />
+        {/* Collapsible TTS Content */}
+        {!isTtsCollapsed && (
+          <View style={styles.collapsibleContent}>
+            {/* Text Input for TTS */}
+            <TextInput
+              style={styles.textInput}
+              placeholder="Enter text to synthesize"
+              value={ttsText}
+              onChangeText={setTtsText}
+              multiline
+              numberOfLines={3}
+              placeholderTextColor={Colors.secondary}
+            />
+            
+            {/* TTS Controls */}
+            <View style={styles.ttsControls}>
+              <TouchableOpacity
+                style={[styles.ttsButton, styles.startButton]}
+                onPress={handleTtsSynthesis}
+                disabled={isTtsProcessing || playbackStatus === "playing"}
+              >
+                <Text style={styles.buttonText}>Start TTS</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.ttsButton, styles.stopButton]}
+                onPress={handleTtsStop}
+                disabled={!isTtsProcessing && playbackStatus !== "playing"}
+              >
+                <Text style={styles.buttonText}>Stop TTS</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
         
-        {/* TTS Controls */}
-        <View style={styles.ttsControls}>
-          <TouchableOpacity
-            style={[styles.ttsButton, styles.startButton]}
-            onPress={handleTtsSynthesis}
-            disabled={isTtsProcessing || playbackStatus === "playing"}
-          >
-            <Text style={styles.buttonText}>Start TTS</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.ttsButton, styles.stopButton]}
-            onPress={handleTtsStop}
-            disabled={!isTtsProcessing && playbackStatus !== "playing"}
-          >
-            <Text style={styles.buttonText}>Stop TTS</Text>
-          </TouchableOpacity>
-        </View>
-        
-        {/* Status Indicators */}
+        {/* Status Indicators - Always Visible */}
         <View style={styles.statusIndicators}>
           {/* Audio Status */}
           <View style={styles.statusIndicatorItem}>
@@ -653,8 +672,6 @@ export const AliBailianDemo = () => {
             </Text>
           </View>
         </View>
-        
-
       </View>
     </View>
   ) : micAccess === "denied" ? (
@@ -959,6 +976,32 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     marginRight: 10
+  },
+  
+  // Collapsible Section Styles
+  collapsibleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    marginBottom: 10
+  },
+  collapseIconContainer: {
+    padding: 5,
+    borderRadius: 5
+  },
+  collapseIcon: {
+    color: Colors.primary,
+    fontSize: 18,
+    fontWeight: "bold"
+  },
+  collapsibleContent: {
+    marginTop: 5,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: Colors.bgInactive
   },
   
   // Buffer Status Styles
