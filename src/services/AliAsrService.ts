@@ -25,6 +25,31 @@ export interface AsrConfig {
   parameters: any;
 }
 
+export const LanguageOptions = {
+  "zh": "中文",
+  "en": "英文",
+  "ja": "日文",
+  "ko": "韩文",
+  "yue": "粤语",
+  "de": "德语",
+  "fr": "法语",
+  "ru": "俄语",
+  "es": "西班牙语",
+  "it": "意大利语",
+  "pt": "葡萄牙语",
+  "id": "印尼语",
+  "ar": "阿拉伯语",
+  "th": "泰语",
+  "hi": "印地语",
+  "da": "丹麦语",
+  "ur": "乌尔都语",
+  "tr": "土耳其语",
+  "nl": "荷兰语",
+  "ms": "马来语",
+  "vi": "越南语"
+}
+
+
 export class FunConfig implements AsrConfig {
   model: string = "fun-asr-realtime";
   task_group: string = "audio";
@@ -301,7 +326,7 @@ export class AliAsrService {
     if (!(audioData instanceof Int16Array)) {
       throw new TypeError("[asr] Audio data must be an Int16Array.");
     }
-    // console.log('[asr] Sending audio data:',audioData.length, audioData[0], audioData[500], audioData[1000]);
+    console.log('[asr] Sending audio data:',audioData.length, audioData[0], audioData[500], audioData[1000]);
     this.socket.send(audioData);
   }
   

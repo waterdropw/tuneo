@@ -26,6 +26,32 @@ export interface TtsConfig {
   parameters: any;
 }
 
+export const FangyanOptions = {
+  "bj": "普通话",
+  "gd": "广东话",
+  "db": "东北话",
+  "gs": "甘肃话",
+  "gz": "贵州话",
+  "hn": "河南话",
+  "hb": "湖北话",
+  "jx": "江西话",
+  "mn": "闽南话",
+  "nx": "宁夏话",
+  "sx": "山西话",
+  "sn": "陕西话",
+  "sd": "山东话",
+  "sh": "上海话",
+  "sc": "四川话",
+  "tj": "天津话",
+  "yn": "云南话",
+}
+
+export const YinseOptions = {
+  "longanyang": "龙安洋(阳光大男孩 20~30岁)",
+  "longanhuan": "龙安欢(欢脱元气女 20~30岁)",
+  "longhuhu_v3": "龙呼呼(天真烂漫女童 6~10岁)",
+}
+
 /**
  * CosyVoice语音合成模型配置
  */ 

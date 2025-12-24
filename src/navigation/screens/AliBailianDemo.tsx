@@ -19,11 +19,13 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity } from 
 import { AudioModule } from "expo-audio"
 import Colors from "@/colors"
 import RequireMicAccess from "@/components/RequireMicAccess"
-import { AliAsrService, GummyConfig } from "@/services/AliAsrService"
-import { AliTtsService, CosyvoiceConfig } from "@/services/AliTtsService"
+import { AliAsrService, GummyConfig, LanguageOptions } from "@/services/AliAsrService"
+import { AliTtsService, CosyvoiceConfig, FangyanOptions, YinseOptions } from "@/services/AliTtsService"
 import { AudioSource } from "@/services/AudioSource"
 import * as FileSystem from 'expo-file-system'
 import Sound from 'react-native-sound'
+import { Picker } from "@/components/Picker"
+import { MenuAction } from "@react-native-menu/menu"
 
 type MicrophoneAccess = "pending" | "granted" | "denied"
 
@@ -37,11 +39,25 @@ export const AliBailianDemo = () => {
   
   // TTS state
   const [ttsText, setTtsText] = useState("")           // 用户输入的待合成文本
-  const [isAudioPlaying, setIsAudioPlaying] = useState(false) // 音频播放状态
+  const [isTtsProcessing, setIsTtsProcessing] = useState(false) // TTS处理状态
   const [ttsStatus, setTtsStatus] = useState("")       // TTS状态信息
   
   // Audio playback state
   const [playbackStatus, setPlaybackStatus] = useState("stopped") // "stopped", "playing", "paused"
+  
+  // 使用useRef存储最新的playbackStatus，确保回调函数能访问到最新值
+  const playbackStatusRef = useRef(playbackStatus)
+  
+  // 当playbackStatus变化时，更新ref
+  useEffect(() => {
+    playbackStatusRef.current = playbackStatus
+  }, [playbackStatus])
+  
+  
+  // 当playbackStatus变化时更新ref
+  useEffect(() => {
+    playbackStatusRef.current = playbackStatus
+  }, [playbackStatus])
   
   // 存储ASR服务返回的结果键值对
   const [resultPairs, setResultPairs] = useState<{ key: string; value: string }[]>([])
@@ -49,6 +65,29 @@ export const AliBailianDemo = () => {
   const [latestAsrText, setLatestAsrText] = useState("")
   // 存储已处理的结果对哈希，避免重复触发TTS
   const [processedResultHash, setProcessedResultHash] = useState("")
+  
+  // 翻译目标语言状态
+  const [targetLanguage, setTargetLanguage] = useState<string>("en")
+  // 中文的方言状态
+  const [dialect, setDialect] = useState<string>("bj")
+  // TTS音色状态
+  const [voice, setVoice] = useState<string>("longanyang")
+  
+  // 支持的翻译语言列表
+  const languageOptions: MenuAction[] = Object.entries(LanguageOptions).map(([id, title]) => ({
+    id,
+    title: `${title} (${id})`
+  }))
+  // 支持的方言列表
+  const fangyanOptions: MenuAction[] = Object.entries(FangyanOptions).map(([id, title]) => ({
+    id,
+    title
+  }))
+  // 支持的音色列表
+  const yinseOptions: MenuAction[] = Object.entries(YinseOptions).map(([id, title]) => ({
+    id,
+    title
+  }))
   
   // ScrollView ref for auto-scrolling to latest results
   const scrollViewRef = useRef<ScrollView>(null)
@@ -62,6 +101,72 @@ export const AliBailianDemo = () => {
   const audioDataBuffer = useRef<Uint8Array[]>([])
   const isAudioComplete = useRef(false)
   const soundRef = useRef<Sound | null>(null)
+  
+  // Update result pairs helper function - 使用useCallback确保引用稳定
+  const updateResultPairs = useCallback((result: Record<string, string>) => {
+    // 将Record<string, string>转换为键值对数组
+    const newPairs: { key: string; value: string }[] = Object.entries(result).map(([key, value]) => ({
+      key,
+      value
+    }));
+    
+    // 直接设置最新结果，完全丢弃所有旧结果
+    setResultPairs(newPairs);
+  }, [])
+  
+  // Play audio from buffer - 使用useCallback确保引用稳定
+  const playAudioBuffer = useCallback(async () => {
+    if (audioDataBuffer.current.length === 0) {
+      setPlaybackStatus("No audio data to play")
+      return
+    }
+    
+    setPlaybackStatus("playing")
+    
+    try {
+      // Combine audio data chunks
+      const totalLength = audioDataBuffer.current.reduce((acc, chunk) => acc + chunk.byteLength, 0)
+      const combinedBuffer = new Uint8Array(totalLength)
+      let offset = 0
+      for (const chunk of audioDataBuffer.current) {
+        combinedBuffer.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      
+      // Convert Uint8Array to base64 string
+      const base64Data = btoa(String.fromCharCode(...combinedBuffer))
+      
+      // Write to temporary file and play
+      const path = `${FileSystem.cacheDirectory}temp_audio.mp3`
+      
+      // Write to temporary file
+      await FileSystem.writeAsStringAsync(path, base64Data, {
+        encoding: FileSystem.EncodingType.Base64
+      })
+      
+      // Play the file
+      const sound = new Sound(path, '', (error) => {
+        if (error) {
+          console.log('加载失败', error)
+          setIsTtsProcessing(false)
+          setPlaybackStatus("stopped")
+          return
+        }
+        sound.play(() => {
+          sound.release()
+          soundRef.current = null
+          setPlaybackStatus("stopped")
+          setIsTtsProcessing(false)
+        })
+      })
+      
+      soundRef.current = sound
+      
+    } catch (error) {
+      console.error("Failed to play audio:", error)
+      setPlaybackStatus("stopped")
+    }
+  }, [])
 
   // Request microphone permission
   useEffect(() => {
@@ -82,11 +187,22 @@ export const AliBailianDemo = () => {
     
     // Create ASR service instance with GummyConfig for translation
     const config = new GummyConfig()
+    // Set the translation target language based on user selection
+    config.parameters.translation_target_languages = [targetLanguage]
     const asrService = new AliAsrService(config)
     asrServiceRef.current = asrService
     
     // Create TTS service instance with CosyvoiceConfig
     const ttsConfig = new CosyvoiceConfig()
+    ttsConfig.parameters.language_hints = [targetLanguage]
+    ttsConfig.parameters.voice = voice
+    if (targetLanguage === "zh") {
+      const selectedDialect = fangyanOptions.find(option => option.id === dialect);
+      ttsConfig.parameters.instruction = `请用${selectedDialect?.title || "中文"}表达。`
+    } else if (targetLanguage !== "en") {
+      const selectedLanguage = LanguageOptions[targetLanguage as keyof typeof LanguageOptions];
+      ttsConfig.parameters.instruction = `你会用${selectedLanguage || "该语言"}说出来。` 
+    }
     const ttsService = new AliTtsService(ttsConfig)
     ttsServiceRef.current = ttsService
     
@@ -136,7 +252,6 @@ export const AliBailianDemo = () => {
         audioDataBuffer.current.push(new Uint8Array(audioData))
       } else {
         // Audio stream ended
-        setTtsStatus("Audio synthesis completed")
         isAudioComplete.current = true
       }
     })
@@ -145,7 +260,7 @@ export const AliBailianDemo = () => {
     ttsService.setErrorCallback((error) => {
       console.error("TTS error:", error)
       setTtsStatus(`TTS Error: ${error.message}`)
-      setIsAudioPlaying(false)
+      setIsTtsProcessing(false)
     })
     
     // Set up event callback for TTS service
@@ -153,20 +268,21 @@ export const AliBailianDemo = () => {
       console.log("TTS event:", event, data)
       switch (event) {
         case "task-started":
-          setTtsStatus("Audio synthesis started")
+          setIsTtsProcessing(true)
+          setTtsStatus("TTS synthesis started")
           // Reset audio buffer and status - 确保在开始合成时清空缓冲区
           audioDataBuffer.current = []
           isAudioComplete.current = false
           break
         case "task-finished":
-          setTtsStatus("Audio synthesis finished")
-          setIsAudioPlaying(false)
+          setTtsStatus("TTS synthesis finished")
+          setIsTtsProcessing(false)
           // Auto play audio when synthesis is finished
           playAudioBuffer()
           break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
-          setIsAudioPlaying(false)
+          setIsTtsProcessing(false)
           break
       }
     })
@@ -200,20 +316,10 @@ export const AliBailianDemo = () => {
       }
       // Reset playback status
       setPlaybackStatus("stopped")
+      setIsTtsProcessing(false)
+      setTtsStatus("Ready")
     }
-  }, [micAccess])
-  
-  // Update result pairs helper function - 使用useCallback确保引用稳定
-  const updateResultPairs = useCallback((result: Record<string, string>) => {
-    // 将Record<string, string>转换为键值对数组
-    const newPairs: { key: string; value: string }[] = Object.entries(result).map(([key, value]) => ({
-      key,
-      value
-    }));
-    
-    // 直接设置最新结果，完全丢弃所有旧结果
-    setResultPairs(newPairs);
-  }, [])
+  }, [micAccess, targetLanguage, dialect, playAudioBuffer, updateResultPairs])
   
   // Auto trigger TTS when ASR result is updated
   useEffect(() => {
@@ -236,7 +342,7 @@ export const AliBailianDemo = () => {
         console.log("Skipping duplicate TTS trigger for the same result");
         return;
       }
-      
+      setIsTtsProcessing(true)
       setTtsStatus("Connecting to TTS service...");
       
       try {
@@ -251,15 +357,15 @@ export const AliBailianDemo = () => {
         
         // Update the processed hash to avoid duplicate triggers
         setProcessedResultHash(resultHash);
-        
       } catch (error) {
         console.error("Failed to auto-trigger TTS synthesis:", error);
         setTtsStatus(`Failed to auto-trigger TTS: ${error instanceof Error ? error.message : String(error)}`);
+        setIsTtsProcessing(false)
       }
     };
     
     triggerTTS();
-  }, [resultPairs]);
+  }, [resultPairs, processedResultHash]);
   
   // 3. 更新开始处理函数，重置动态结果数组
   const handleStartProcessing = async () => {
@@ -278,6 +384,8 @@ export const AliBailianDemo = () => {
     setLatestAsrText("")
     // 重置已处理结果哈希，允许新结果触发TTS
     setProcessedResultHash("")
+    setIsTtsProcessing(false)
+    setTtsStatus("Ready")
     
     try {
       // Connect to ASR service
@@ -287,7 +395,7 @@ export const AliBailianDemo = () => {
       
       // Start audio processing with callback to send audio to ASR service
       audioProcessor.startProcessing((processedData) => {
-        if (processedData && processedData.data && asrService.isReady() && !isAudioPlaying) {
+        if (processedData && processedData.data && asrService.isReady() && playbackStatusRef.current === "stopped") {
           try {
             asrService.sendAudio(processedData.data)
           } catch (error) {
@@ -347,6 +455,7 @@ export const AliBailianDemo = () => {
       return
     }
     
+    setIsTtsProcessing(true)
     setTtsStatus("Connecting to TTS service...")
     
     try {
@@ -361,6 +470,7 @@ export const AliBailianDemo = () => {
     } catch (error) {
       console.error("Failed to start TTS synthesis:", error)
       setTtsStatus(`Failed to start TTS synthesis: ${error instanceof Error ? error.message : String(error)}`)
+      setIsTtsProcessing(false)
     }
   }
   
@@ -381,79 +491,15 @@ export const AliBailianDemo = () => {
         soundRef.current.release()
         soundRef.current = null
       }
-      setIsAudioPlaying(false)
+      setIsTtsProcessing(false)
       setTtsStatus("TTS synthesis stopped")
       setPlaybackStatus("stopped")
     } catch (error) {
       console.error("Failed to stop TTS synthesis:", error)
       setTtsStatus(`Failed to stop TTS synthesis: ${error instanceof Error ? error.message : String(error)}`)
+      setIsTtsProcessing(false)
     }
   }
-  
-  // Play audio from buffer - 使用useCallback确保引用稳定
-  const playAudioBuffer = useCallback(async () => {
-    if (audioDataBuffer.current.length === 0) {
-      setTtsStatus("No audio data to play")
-      return
-    }
-    
-    // 1. 播放前停止ASR服务
-    setIsAudioPlaying(true)
-
-    setTtsStatus("Playing audio...")
-    setPlaybackStatus("playing")
-    
-    try {
-      // Combine audio data chunks
-      const totalLength = audioDataBuffer.current.reduce((acc, chunk) => acc + chunk.byteLength, 0)
-      const combinedBuffer = new Uint8Array(totalLength)
-      let offset = 0
-      for (const chunk of audioDataBuffer.current) {
-        combinedBuffer.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      
-      // Convert Uint8Array to base64 string
-      const base64Data = btoa(String.fromCharCode(...combinedBuffer))
-      
-      // Write to temporary file and play
-      const path = `${FileSystem.cacheDirectory}temp_audio.mp3`
-      
-      // Write to temporary file
-      await FileSystem.writeAsStringAsync(path, base64Data, {
-        encoding: FileSystem.EncodingType.Base64
-      })
-      
-      // Play the file
-      const sound = new Sound(path, '', (error) => {
-        if (error) {
-          console.log('加载失败', error)
-          setTtsStatus(`Audio playback error: ${error.message}`)
-          setPlaybackStatus("stopped")
-          // 播放失败时也尝试重新启动ASR
-          setIsAudioPlaying(false)
-          return
-        }
-        sound.play(() => {
-          sound.release()
-          soundRef.current = null
-          setPlaybackStatus("stopped")
-          setTtsStatus("Audio playback completed")
-          // 2. 播放结束后重新启动ASR服务
-          setIsAudioPlaying(false)
-        })
-      })
-      
-      soundRef.current = sound
-      
-    } catch (error) {
-      console.error("Failed to play audio:", error)
-      setTtsStatus(`Audio playback error: ${error instanceof Error ? error.message : String(error)}`)
-      setPlaybackStatus("stopped")
-      // 播放失败时也尝试重新启动ASR
-      setIsAudioPlaying(false)
-    }
-  }, [])
   
   // 4. 实现动态View创建与布局
   return micAccess === "granted" ? (
@@ -471,12 +517,26 @@ export const AliBailianDemo = () => {
               {isProcessing ? "Stop ASR" : "Start ASR"}
             </Text>
           </TouchableOpacity>
+          
+          <View style={styles.pickerContainer}>
+            <Picker
+              actions={languageOptions}
+              onSelect={(lang) => setTargetLanguage(lang)}
+              value={targetLanguage}
+            >
+              <TouchableOpacity style={styles.languageButton}>
+                <Text style={styles.languageButtonText}>
+                  {languageOptions.find(lang => lang.id === targetLanguage)?.title || targetLanguage}
+                </Text>
+              </TouchableOpacity>
+            </Picker>
+          </View>
         </View>
         
         {/* 固定永久显示的文本框，内容可上下滚动 */}
         <View style={styles.resultTextContainer}>
           {/* 标题 */}
-          <Text style={styles.resultTextTitle}>ASR Recognition Result</Text>
+          <Text style={styles.resultTextTitle}>ASR Result</Text>
           {/* 可滚动的文本内容 */}
           <ScrollView 
             style={styles.resultTextScroll} 
@@ -502,7 +562,40 @@ export const AliBailianDemo = () => {
       
       {/* TTS Section */}
       <View style={styles.section}>
-        <Text style={styles.title}>TTS Synthesis</Text>
+        {/* TTS Title with Language and Voice Selection */}
+        <View style={styles.titleWithLanguage}>
+          <Text style={styles.title}>TTS</Text>
+          
+          {/* TTS Language Selection */}
+          <View style={styles.titlePickerContainer}>
+            <Picker
+              actions={fangyanOptions}
+              onSelect={(lang) => setDialect(lang)}
+              value={dialect}
+            >
+              <TouchableOpacity style={styles.titleLanguageButton}>
+                <Text style={styles.titleLanguageButtonText}>
+                  {fangyanOptions.find(lang => lang.id === dialect)?.title || dialect}
+                </Text>
+              </TouchableOpacity>
+            </Picker>
+          </View>
+          
+          {/* TTS Voice Selection */}
+          <View style={styles.titlePickerContainer}>
+            <Picker
+              actions={yinseOptions}
+              onSelect={(v) => setVoice(v)}
+              value={voice}
+            >
+              <TouchableOpacity style={styles.titleLanguageButton}>
+                <Text style={styles.titleLanguageButtonText}>
+                  {yinseOptions.find(v => v.id === voice)?.title || voice}
+                </Text>
+              </TouchableOpacity>
+            </Picker>
+          </View>
+        </View>
         
         {/* Text Input for TTS */}
         <TextInput
@@ -520,7 +613,7 @@ export const AliBailianDemo = () => {
           <TouchableOpacity
             style={[styles.ttsButton, styles.startButton]}
             onPress={handleTtsSynthesis}
-            disabled={isAudioPlaying}
+            disabled={isTtsProcessing || playbackStatus === "playing"}
           >
             <Text style={styles.buttonText}>Start TTS</Text>
           </TouchableOpacity>
@@ -528,7 +621,7 @@ export const AliBailianDemo = () => {
           <TouchableOpacity
             style={[styles.ttsButton, styles.stopButton]}
             onPress={handleTtsStop}
-            disabled={!isAudioPlaying}
+            disabled={!isTtsProcessing && playbackStatus !== "playing"}
           >
             <Text style={styles.buttonText}>Stop TTS</Text>
           </TouchableOpacity>
@@ -539,7 +632,7 @@ export const AliBailianDemo = () => {
           {/* Audio Status */}
           <View style={styles.statusIndicatorItem}>
             <View style={[styles.statusDot, {
-              backgroundColor: isAudioPlaying ? Colors.primary : Colors.secondary
+              backgroundColor: isTtsProcessing ? Colors.primary : Colors.secondary
             }]} />
             <Text style={styles.statusLabel}>TTS:</Text>
             <Text style={styles.statusText}>{ttsStatus || "Ready"}</Text>
@@ -584,7 +677,34 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: Colors.primary,
     marginBottom: 20,
-    textAlign: "center"
+    textAlign: "center",
+    flex: 1
+  },
+  titleWithLanguage: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+    gap: 10
+  },
+  titlePickerContainer: {
+    flex: 1,
+    maxWidth: 200
+  },
+  titleLanguageButton: {
+    backgroundColor: Colors.bgInactive,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: Colors.primary
+  },
+  titleLanguageButtonText: {
+    color: Colors.primary,
+    fontWeight: "bold",
+    fontSize: 14
   },
   section: {
     marginBottom: 30,
@@ -598,7 +718,28 @@ const styles = StyleSheet.create({
     elevation: 3
   },
   controls: {
-    marginBottom: 20
+    marginBottom: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 15
+  },
+  pickerContainer: {
+    flex: 1
+  },
+  languageButton: {
+    backgroundColor: Colors.bgInactive,
+    borderRadius: 10,
+    padding: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: Colors.primary
+  },
+  languageButtonText: {
+    color: Colors.primary,
+    fontWeight: "bold",
+    fontSize: 16
   },
   
   // 5. 新增样式：可滑动容器
