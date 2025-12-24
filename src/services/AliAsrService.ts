@@ -285,6 +285,9 @@ export class AliAsrService {
                     }
                   });
                 }
+              } else if (this.config.parameters.translation_target_languages[0] === "zh") {
+                // 返回识别结果，便于统一处理中文方言的TTS
+                translations["zh"] = asrResult;
               }
             }
 
