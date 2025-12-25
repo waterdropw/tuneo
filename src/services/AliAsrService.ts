@@ -104,7 +104,7 @@ export class ParaformerConfig implements AsrConfig {
     multi_threshold_mode_enabled: false,
     punctuation_prediction_enabled: true,
     inverse_text_normalization_enabled: true,
-    max_sentence_silence: 800,
+    max_sentence_silence: 1200,
   };
   resources?: {
     resource_id: string;    // 热词ID，此次语音识别中生效此热词ID对应的热词信息。默认不启用。需和resource_type参数配合使用。注：resource_id对应SDK中的phrase_id字段，phrase_id为v1版本模型热词方案，不支持v2及后续系列模型。

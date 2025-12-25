@@ -56,11 +56,6 @@ export const AliBailianDemo = () => {
   }, [playbackStatus])
   
   
-  // 当playbackStatus变化时更新ref
-  useEffect(() => {
-    playbackStatusRef.current = playbackStatus
-  }, [playbackStatus])
-  
   // 存储ASR服务返回的结果键值对
   const [resultPairs, setResultPairs] = useState<{ key: string; value: string }[]>([])
   // 存储最新的ASR识别文本，用于自动TTS
@@ -340,7 +335,7 @@ export const AliBailianDemo = () => {
       setIsTtsProcessing(false)
       setTtsStatus("Ready")
     }
-  }, [micAccess, targetLanguage, dialect, playAudioBuffer, updateResultPairs])
+  }, [micAccess, targetLanguage, dialect, voice, playAudioBuffer, updateResultPairs])
   
   // Auto trigger TTS when ASR result is updated
   useEffect(() => {
