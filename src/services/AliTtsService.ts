@@ -5,6 +5,8 @@
  * https://github.com/aliyun/alibabacloud-bailian-speech-demo/blob/master/samples/gallery/cosyvoice-js/cosyvoice_api.js
  */
 
+const DEFAULT_VOICE = 'loongcindy_v2';
+
 // 私有：定义WebSocket消息类型
 interface WebSocketMessage {
   header: {
@@ -26,37 +28,889 @@ export interface TtsConfig {
   parameters: any;
 }
 
-export const FangyanOptions = {
-  "bj": "普通话",
-  "gd": "广东话",
-  "db": "东北话",
-  "gs": "甘肃话",
-  "gz": "贵州话",
-  "hn": "河南话",
-  "hb": "湖北话",
-  "jx": "江西话",
-  "mn": "闽南话",
-  "nx": "宁夏话",
-  "sx": "山西话",
-  "sn": "陕西话",
-  "sd": "山东话",
-  "sh": "上海话",
-  "sc": "四川话",
-  "tj": "天津话",
-  "yn": "云南话",
-}
+/**
+ * 进行语音合成时：
+ * 每个模型（model）仅支持一组特定的音色（voice），不能将一个模型的音色与另一个模型混用
+ * 待合成文本（text）必须在所选音色支持的语言范围内，否则可能出现发音错误或不自然
+ * 对于支持SSML的音色，如需使用SSML功能，请参见SSML标记语言介绍，在请求参数text中填写符合SSML规范的内容
+ * 对于支持Instruct的音色，如需使用Instruct功能，请在请求参数instruction中填写符合Instruct格式要求的文本
+ * 对于支持时间戳的音色，如需使用时间戳功能，请通过请求参数word_timestamp_enabled（Java SDK中为enableWordTimestamp）开启该功能 
+*/
 
+/** 
+ * 官方文档里不同版本有些音色，我们只选择高版本的。
+ * 所以该列表里，高版本最新的音色全部都有，低版本的去掉重复的，高版本里没有的，比如日语、韩语、方言等音色补充进来。
+*/
 export const YinseOptions = {
-  "longanyang": "龙安洋(阳光大男孩 20~30岁)",
-  "longanhuan": "龙安欢(欢脱元气女 20~30岁)",
-  "longhuhu_v3": "龙呼呼(天真烂漫女童 6~10岁)",
+  // cosyvoice-v3-flash, cosyvoice-v3-plus(only 2)音色列表
+  "longanyang": 
+  {
+    "name": "龙安洋",
+    "attr": "阳光大男孩",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash", "cosyvoice-v3-plus"],
+    "scens": "社交陪伴（标杆音色）",
+    "ssml": true,
+    "instruct": true,
+    "timestamp": false,
+  },
+  "longanhuan": 
+  {
+    "name": "龙安欢",
+    "attr": "欢脱元气女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash", "cosyvoice-v3-plus"],
+    "scens": "社交陪伴（标杆音色）",
+    "ssml": true,
+    "instruct": true,
+    "timestamp": false,
+  },
+  "longhuhu_v3": 
+  {
+    "name": "龙呼呼",
+    "attr": "天真烂漫女童",
+    "age": "6~10岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "童声（标杆音色）",
+    "ssml": true,
+    "instruct": true,
+    "timestamp": false,
+  },
+  "longyingmu_v3":
+  {
+    "name": "龙应沐",
+    "attr": "优雅知性女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "电话助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longyingxiao_v3":
+  {
+    "name": "龙应笑",
+    "attr": "清甜推销女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "电话销售",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longyingxun_v3":
+  {
+    "name": "龙应询",
+    "attr": "年轻青涩男",
+    "age": "20~25岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "电话客服",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longyingjing_v3":
+  {
+    "name": "龙应静",
+    "attr": "低调冷静女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "客服",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longyingling_v3":
+  {
+    "name": "龙应聆",
+    "attr": "温和共情女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "客服",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longyingtao_v3":
+  {
+    "name": "龙应桃",
+    "attr": "温柔淡定女",
+    "age": "25~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "客服",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanyun_v3":
+  {
+    "name": "龙安昀",
+    "attr": "居家暖男",
+    "age": "30~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanwen_v3":
+  {
+    "name": "龙安温",
+    "attr": "优雅知性女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanli_v3":
+  {
+    "name": "龙安莉",
+    "attr": "利落从容女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanlang_v3":
+  {
+    "name": "龙安朗",
+    "attr": "清爽利落男",
+    "age": "20~25岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanrou_v3":
+  {
+    "name": "龙安柔",
+    "attr": "温柔闺蜜女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longhan_v3":
+  {
+    "name": "龙寒",
+    "attr": "温暖痴情男",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longanzhi_v3":
+  {
+    "name": "龙安智",
+    "attr": "睿智轻熟男",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanling_v3":
+  {
+    "name": "龙安灵",
+    "attr": "思维灵动女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longanya_v3":
+  {
+    "name": "龙安雅",
+    "attr": "高雅气质女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanqin_v3":
+  {
+    "name": "龙安亲",
+    "attr": "亲和活泼女",
+    "age": "20~25岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "陪伴闲聊",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longwanjun_v3":
+  {
+    "name": "龙婉君",
+    "attr": "细腻柔声女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longyichen_v3":
+  {
+    "name": "龙逸尘",
+    "attr": "洒脱活力男",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longlaobo_v3":
+  {
+    "name": "龙老伯",
+    "attr": "沧桑岁月爷",
+    "age": "60岁以上",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longlaoyi_v3":
+  {
+    "name": "龙老姨",
+    "attr": "烟火从容阿姨",
+    "age": "60岁以上",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longjiqi_v3":
+  {
+    "name": "龙机器",
+    "attr": "呆萌机器人",
+    "age": "不限",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longhouge_v3":
+  {
+    "name": "龙猴哥",
+    "attr": "经典猴哥",
+    "age": "不限",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longdaiyu_v3":
+  {
+    "name": "龙黛玉",
+    "attr": "娇率才女音",
+    "age": "15~25岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  // 方言
+  "longanyue_v3":
+  {
+    "name": "龙安粤",
+    "attr": "欢脱粤语男",
+    "age": "20~30岁",
+    "langs": ["yue"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longshange_v3":
+  {
+    "name": "龙陕哥",
+    "attr": "原味陕北男",
+    "age": "30~40岁",
+    "langs": ["sn"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanmin_v3":
+  {
+    "name": "龙安闽",
+    "attr": "清纯萝莉女",
+    "age": "18~25岁",
+    "langs": ["mn"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "longanxuan_v3":
+  {
+    "name": "龙安宣",
+    "attr": "经典直播女",
+    "age": "30~40岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "直播带货",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongbella_v3":
+  {
+    "name": "Bella3.0",
+    "attr": "精准干练女",
+    "age": "25~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v3-flash"],
+    "scens": "新闻播报",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+
+
+
+  // cosyvoice-v2音色列表
+
+  // 儿童
+  "longwangwang":
+  {
+    "name": "龙汪汪",
+    "attr": "台湾少年音",
+    "age": "6~10岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longpaopao":
+  {
+    "name": "龙泡泡",
+    "attr": "飞天泡泡音",
+    "age": "6~10岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longshanshan":
+  {
+    "name": "龙闪闪",
+    "attr": "戏剧化童声",
+    "age": "6~10岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longniuniu":
+  {
+    "name": "龙牛牛",
+    "attr": "阳光男童声",
+    "age": "6~10岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  // 童声
+  "longjielidou_v2":
+  {
+    "name": "龙杰力豆",
+    "attr": "阳光顽皮男",
+    "age": "0~6岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longling_v2":
+  {
+    "name": "龙铃",
+    "attr": "稚气呆板女",
+    "age": "0~6岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longke_v2":
+  {
+    "name": "龙可",
+    "attr": "懵懂乖乖女",
+    "age": "0~6岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longxian_v2":
+  {
+    "name": "龙仙",
+    "attr": "豪放可爱女",
+    "age": "0~6岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  
+  // 方言
+  "longlaotie_v2":
+  {
+    "name": "龙老铁",
+    "attr": "古早味男",
+    "age": "东北直率男",
+    "langs": ["db"],
+    "models": ["cosyvoice-v2"],
+    "scens": "方言",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longjiayi_v2":
+  {
+    "name": "龙嘉怡",
+    "attr": "知性粤语女",
+    "age": "20~30岁",
+    "langs": ["yue"],
+    "models": ["cosyvoice-v2"],
+    "scens": "方言",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longtao_v2":
+  {
+    "name": "龙桃",
+    "attr": "积极粤语女",
+    "age": "20~30岁",
+    "langs": ["yue"],
+    "models": ["cosyvoice-v2"],
+    "scens": "方言",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  // 外语
+  "loongyuuna_v2":
+  {
+    "name": "Yuuna",
+    "attr": "元气霓虹女",
+    "age": "20~30岁",
+    "langs": ["ja"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "loongyuuma_v2":
+  {
+    "name": "Yuuma",
+    "attr": "干练霓虹男",
+    "age": "20~30岁",
+    "langs": ["ja"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "loongtomoka_v2":
+  {
+    "name": "Tomoka",
+    "attr": "日语女",
+    "age": "20~30岁",
+    "langs": ["ja"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongtomoya_v2":
+  {
+    "name": "Tomoya",
+    "attr": "日语男",
+    "age": "20~30岁",
+    "langs": ["ja"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongjihun_v2":
+  {
+    "name": "Jihun",
+    "attr": "阳光韩国男",
+    "age": "20~30岁",
+    "langs": ["ko"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongkyong_v2":
+  {
+    "name": "Kyong",
+    "attr": "韩语女",
+    "age": "20~30岁",
+    "langs": ["ko"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongeva_v2":
+  {
+    "name": "Eva",
+    "attr": "知性英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongbrian_v2":
+  {
+    "name": "Brian",
+    "attr": "沉稳英文男",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongluna_v2":
+  {
+    "name": "Luna",
+    "attr": "英式英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongluca_v2":
+  {
+    "name": "Luca",
+    "attr": "英式英文男",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongemily_v2":
+  {
+    "name": "Emily",
+    "attr": "英式英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongeric_v2":
+  {
+    "name": "Eric",
+    "attr": "英式英文男",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+
+  "loongabby_v2":
+  {
+    "name": "Abby",
+    "attr": "美式英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongannie_v2":
+  {
+    "name": "Annie",
+    "attr": "美式英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongcindy_v2":
+  {
+    "name": "Cindy",
+    "attr": "美式英文女",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongandy_v2":
+  {
+    "name": "Andy",
+    "attr": "美式英文男",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+  "loongdavid_v2":
+  {
+    "name": "David",
+    "attr": "美式英文男",
+    "age": "20~30岁",
+    "langs": ["en"],
+    "models": ["cosyvoice-v2"],
+    "scens": "出海营销",
+    "ssml": false,
+    "instruct": false,
+    "timestamp": false,
+  },
+
+
+  // 更多
+  "longjixin":
+  {
+    "name": "龙机心",
+    "attr": "毒舌心机女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longgaoseng":
+  {
+    "name": "龙高僧",
+    "attr": "得道高僧音",
+    "age": "60岁以上",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "短视频配音",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  
+  "longxiaochun_v2":
+  {
+    "name": "龙小淳",
+    "attr": "知性积极女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longxiaoxia_v2":
+  {
+    "name": "龙小夏",
+    "attr": "沉稳权威女",
+    "age": "30~40岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "语音助手",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longbaizhi":
+  {
+    "name": "龙白芷",
+    "attr": "睿气旁白女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longsanshu":
+  {
+    "name": "龙三叔",
+    "attr": "沉稳质感男",
+    "age": "40~50岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longxiu_v2":
+  {
+    "name": "龙修",
+    "attr": "博才说书男",
+    "age": "30~40岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longmiao_v2":
+  {
+    "name": "龙妙",
+    "attr": "抑扬顿挫女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longyue_v2":
+  {
+    "name": "龙悦",
+    "attr": "温暖磁性女",
+    "age": "25~35岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longnan_v2":
+  {
+    "name": "龙楠",
+    "attr": "睿智青年男",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longyuan_v2":
+  {
+    "name": "龙媛",
+    "attr": "温暖治愈女",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "有声书",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
+  "longanshuo":
+  {
+    "name": "龙安朔",
+    "attr": "干净清爽男",
+    "age": "20~30岁",
+    "langs": ["zh"],
+    "models": ["cosyvoice-v2"],
+    "scens": "社交陪伴",
+    "ssml": true,
+    "instruct": false,
+    "timestamp": true,
+  },
 }
 
 /**
  * CosyVoice语音合成模型配置
  */ 
 export class CosyvoiceConfig implements TtsConfig {
-  model: "cosyvoice-v2" | "cosyvoice-v3-flash" | "cosyvoice-v3-plus" = "cosyvoice-v3-flash";
+  model: "cosyvoice-v2" | "cosyvoice-v3-flash" | "cosyvoice-v3-plus" = "cosyvoice-v2";
   task_group: string = "audio";
   task: string = "tts";
   function: string = "SpeechSynthesizer";
@@ -80,7 +934,7 @@ export class CosyvoiceConfig implements TtsConfig {
     aigc_propagate_id?: string; // 设置AIGC隐性标识中的 PropagateID 字段，用于唯一标识一次具体的传播行为。仅在 enable_aigc_tag 为 true 时生效。默认值：本次语音合成请求Request ID
   } = {
     text_type: "plain",
-    voice: "longanhuan",
+    voice: DEFAULT_VOICE,
     format: "mp3",
     sample_rate: 22050,
     volume: 50,
@@ -115,6 +969,8 @@ export type TtsEventCallback = (
   data?: any
 ) => void;
 
+
+
 /**
  * 语音合成服务类
  */
@@ -127,6 +983,7 @@ export class AliTtsService {
   private isConnected: boolean = false;
   private isTaskStarted: boolean = false;
   private isTaskFinished: boolean = false;
+  private isAudioEndNotified: boolean = false; // 标志位，避免重复发送音频结束通知
   private messageQueue: any[] = [];
   private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
@@ -147,6 +1004,20 @@ export class AliTtsService {
     }
     this.wsUrl = `wss://dashscope.aliyuncs.com/api-ws/v1/inference?api_key=${apiKey}`;
     this.config = config;
+    const voice = this.config.parameters.voice || DEFAULT_VOICE;
+    const yinseConfig = (YinseOptions as any)[voice];
+    if (!yinseConfig.models.includes(this.config.model)) {
+      console.warn(`model ${this.config.model} is not supported by voice ${voice}! Use the right model ${yinseConfig.models[0]} instead.`);
+      this.config.model = yinseConfig.models[0];
+    }
+    if (!yinseConfig.instruct && this.config.parameters.instruction) {
+      console.warn(`instruction is not supported by voice ${voice}! will be ignored.`);
+      this.config.parameters.instruction = "";
+    }
+    if (!yinseConfig.timestamp && this.config.parameters.word_timestamp_enabled) {
+      console.warn(`timestamp is not supported by voice ${voice}! will be ignored.`);
+      this.config.parameters.word_timestamp_enabled = false;
+    }
   }
   
   /**
@@ -161,6 +1032,7 @@ export class AliTtsService {
       this.isConnected = false;
       this.isTaskStarted = false;
       this.isTaskFinished = false;
+      this.isAudioEndNotified = false; // 重置音频结束通知标志位
       this.messageQueue = [];
       
       try {
@@ -224,7 +1096,7 @@ export class AliTtsService {
         };
         
         this.socket.onclose = (event) => {
-          console.log("[tts] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}");
+          console.log(`[tts] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
           
           const wasConnected = this.isConnected;
           this.isConnected = false;
@@ -302,7 +1174,9 @@ export class AliTtsService {
    * 通知音频结束
    */
   private notifyAudioEnd(): void {
-    if (this.audioCallback) {
+    // 检查是否已经发送过结束通知，避免重复发送
+    if (this.audioCallback && !this.isAudioEndNotified) {
+      this.isAudioEndNotified = true;
       this.audioCallback(null, {
         isFinal: true,
         timestamp: Date.now()

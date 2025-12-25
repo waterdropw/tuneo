@@ -1,6 +1,9 @@
 /**
  * AliBailianDemo 组件
  * 演示阿里云语音识别(ASR)和文本转语音(TTS)功能的集成
+ * 功能：
+ * 1. 实时语音识别（ASR）：通过麦克风输入，将语音转换为文本
+ * 2. 文本转语音（TTS）：将用户输入的文本转换为语音播放
  * 
  * 重构亮点：
  * 1. 集成了阿里云TTS服务，实现文本到语音的转换
@@ -8,6 +11,7 @@
  * 3. 实现双缓冲技术，确保音频数据处理的流畅性和连续性
  * 4. 设计了合理的缓冲管理策略，避免音频播放卡顿或延迟
  * 5. 实现了完整的音频播放控制逻辑和状态管理
+ * 6. 引入了双缓冲区状态显示，实时展示当前音频处理状态
  * 
  * 组件结构：
  * - ASR Section: 处理语音识别功能
@@ -20,7 +24,7 @@ import { AudioModule } from "expo-audio"
 import Colors from "@/colors"
 import RequireMicAccess from "@/components/RequireMicAccess"
 import { AliAsrService, GummyConfig, LanguageOptions } from "@/services/AliAsrService"
-import { AliTtsService, CosyvoiceConfig, FangyanOptions, YinseOptions } from "@/services/AliTtsService"
+import { AliTtsService, CosyvoiceConfig, YinseOptions } from "@/services/AliTtsService"
 import { AudioSource } from "@/services/AudioSource"
 import * as FileSystem from 'expo-file-system'
 import Sound from 'react-native-sound'
@@ -65,29 +69,68 @@ export const AliBailianDemo = () => {
   
   // 翻译目标语言状态
   const [targetLanguage, setTargetLanguage] = useState<string>("en")
-  // 中文的方言状态
-  const [dialect, setDialect] = useState<string>("bj")
   // TTS音色状态
-  const [voice, setVoice] = useState<string>("longanyang")
+  const [voice, setVoice] = useState<string>("loongcindy_v2")
+
   
   // 支持的翻译语言列表
   const languageOptions: MenuAction[] = Object.entries(LanguageOptions).map(([id, title]) => ({
     id,
     title: `${title} (${id})`
   }))
-  // 支持的方言列表
-  const fangyanOptions: MenuAction[] = Object.entries(FangyanOptions).map(([id, title]) => ({
-    id,
-    title
-  }))
-  // 支持的音色列表
-  const yinseOptions: MenuAction[] = Object.entries(YinseOptions).map(([id, title]) => ({
-    id,
-    title
-  }))
+  // 支持的音色列表（动态计算，根据语言过滤）
+  const [yinseOptions, setYinseOptions] = useState<MenuAction[]>(() => {
+    // 初始加载时，根据默认的targetLanguage生成音色选项
+    const initialTargetLangs = ["en"]; // 默认目标语言是英语
+    return Object.entries(YinseOptions)
+      .filter(([id, info]) => {
+        return initialTargetLangs.some(targetLang => info.langs.includes(targetLang));
+      })
+      .map(([id, info]) => ({
+        id,
+        title: `${info.name} (${info.attr})`
+      }));
+  })
+  
+  // 根据targetLanguage过滤音色选项
+  useEffect(() => {
+    // 构建目标语言列表，包括目标语言和方言
+    const targetLangs = [targetLanguage];
+    
+    // 过滤音色，只保留支持目标语言或方言的音色
+    const filteredYinseOptions = Object.entries(YinseOptions)
+      .filter(([id, info]) => {
+        // 检查音色的langs数组是否包含任何目标语言
+        return targetLangs.some(targetLang => info.langs.includes(targetLang));
+      })
+      .map(([id, info]) => ({
+        id,
+        title: `${info.name} (${info.attr})`
+      }));
+    
+    setYinseOptions(filteredYinseOptions);
+    
+    // 如果当前选中的voice不在过滤后的列表中，自动选择第一个可用音色
+    if (filteredYinseOptions.length > 0) {
+      const voiceExists = filteredYinseOptions.some(option => option.id === voice);
+      if (!voiceExists) {
+        setVoice(filteredYinseOptions[0].id);
+      }
+    }
+  }, [targetLanguage])
   
   // ScrollView ref for auto-scrolling to latest results
   const scrollViewRef = useRef<ScrollView>(null)
+
+  // Auto scroll to bottom when latestAsrText updates
+  useEffect(() => {
+    // 使用 setTimeout 确保在 DOM 更新后执行滚动
+    const timer = setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true })
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [latestAsrText])
   
   // Service instances (using useRef to avoid re-initialization on re-renders)
   const asrServiceRef = useRef<AliAsrService | null>(null)           // ASR服务实例
@@ -201,18 +244,27 @@ export const AliBailianDemo = () => {
     const asrService = new AliAsrService(config)
     asrServiceRef.current = asrService
     
-    // Create TTS service instance with CosyvoiceConfig
+    // Update TTS service configuration instead of creating a new instance
+    let ttsService = ttsServiceRef.current;
+    if (ttsService) {
+      // 关闭旧的TTS服务连接
+      try {
+        ttsService.close();
+      } catch (error) {
+        console.error("Error closing old TTS service:", error);
+      }
+      ttsServiceRef.current = null;
+    }
+    
+    // Create new TTS service instance with updated configuration
     const ttsConfig = new CosyvoiceConfig()
     ttsConfig.parameters.language_hints = [targetLanguage]
     ttsConfig.parameters.voice = voice
-    if (targetLanguage === "zh") {
-      const selectedDialect = fangyanOptions.find(option => option.id === dialect);
-      ttsConfig.parameters.instruction = `请用${selectedDialect?.title || "中文"}表达。`
-    } else if (targetLanguage !== "en") {
+    if (targetLanguage !== "en") {
       const selectedLanguage = LanguageOptions[targetLanguage as keyof typeof LanguageOptions];
       ttsConfig.parameters.instruction = `你会用${selectedLanguage || "该语言"}说出来。` 
     }
-    const ttsService = new AliTtsService(ttsConfig)
+    ttsService = new AliTtsService(ttsConfig)
     ttsServiceRef.current = ttsService
     
     // Create audio processor instance
@@ -335,7 +387,7 @@ export const AliBailianDemo = () => {
       setIsTtsProcessing(false)
       setTtsStatus("Ready")
     }
-  }, [micAccess, targetLanguage, dialect, voice, playAudioBuffer, updateResultPairs])
+  }, [micAccess, targetLanguage, voice, playAudioBuffer, updateResultPairs])
   
   // Auto trigger TTS when ASR result is updated
   useEffect(() => {
@@ -555,10 +607,15 @@ export const AliBailianDemo = () => {
           <Text style={styles.resultTextTitle}>ASR Result</Text>
           {/* 可滚动的文本内容 */}
           <ScrollView 
+            ref={scrollViewRef}
             style={styles.resultTextScroll} 
             showsVerticalScrollIndicator={true}
             // 自动滚动到底部，显示最新结果
             onContentSizeChange={(width, height) => {
+              scrollViewRef.current?.scrollToEnd({ animated: true })
+            }}
+            // 当最新ASR文本更新时也滚动到底部
+            onLayout={() => {
               scrollViewRef.current?.scrollToEnd({ animated: true })
             }}
           >
@@ -585,21 +642,6 @@ export const AliBailianDemo = () => {
         >
           <View style={styles.titleWithLanguage}>
             <Text style={styles.title}>TTS</Text>
-            
-            {/* TTS Language Selection */}
-            <View style={styles.titlePickerContainer}>
-              <Picker
-                actions={fangyanOptions}
-                onSelect={(lang) => setDialect(lang)}
-                value={dialect}
-              >
-                <TouchableOpacity style={styles.titleLanguageButton}>
-                  <Text style={styles.titleLanguageButtonText}>
-                    {fangyanOptions.find(lang => lang.id === dialect)?.title || dialect}
-                  </Text>
-                </TouchableOpacity>
-              </Picker>
-            </View>
             
             {/* TTS Voice Selection */}
             <View style={styles.titlePickerContainer}>
@@ -856,7 +898,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    minHeight: 200
+    minHeight: 100
   },
   resultTextTitle: {
     fontSize: 16,

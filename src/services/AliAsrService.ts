@@ -28,29 +28,46 @@ export interface AsrConfig {
 }
 
 export const LanguageOptions = {
-  "zh": "中文",
+  "zh": "中文", // 普通话
+  // 方言
+  "yue": "粤语",
+  "mn": "闽南话",
+  "sn": "陕西话",
+  "db": "东北话",
+  // "gs": "甘肃话",
+  // "gz": "贵州话",
+  // "hn": "河南话",
+  // "hb": "湖北话",
+  // "jx": "江西话",
+  // "nx": "宁夏话",
+  // "sx": "山西话",
+  // "sd": "山东话",
+  // "sh": "上海话",
+  // "sc": "四川话",
+  // "tj": "天津话",
+  // "yn": "云南话",
+  // 外语
   "en": "英文",
   "ja": "日文",
   "ko": "韩文",
-  "yue": "粤语",
   "de": "德语",
   "fr": "法语",
   "ru": "俄语",
-  "es": "西班牙语",
-  "it": "意大利语",
-  "pt": "葡萄牙语",
-  "id": "印尼语",
-  "ar": "阿拉伯语",
-  "th": "泰语",
-  "hi": "印地语",
-  "da": "丹麦语",
-  "ur": "乌尔都语",
-  "tr": "土耳其语",
-  "nl": "荷兰语",
-  "ms": "马来语",
-  "vi": "越南语"
+  // "es": "西班牙语",
+  // "it": "意大利语",
+  // "pt": "葡萄牙语",
+  // "id": "印尼语",
+  // "ar": "阿拉伯语",
+  // "th": "泰语",
+  // "hi": "印地语",
+  // "da": "丹麦语",
+  // "ur": "乌尔都语",
+  // "tr": "土耳其语",
+  // "nl": "荷兰语",
+  // "ms": "马来语",
+  // "vi": "越南语"
 }
-
+const FANYAN_LIST = ["yue", "mn", "sn", "db"];
 
 export class FunConfig implements AsrConfig {
   model: string = "fun-asr-realtime";
@@ -104,7 +121,7 @@ export class ParaformerConfig implements AsrConfig {
     multi_threshold_mode_enabled: false,
     punctuation_prediction_enabled: true,
     inverse_text_normalization_enabled: true,
-    max_sentence_silence: 1200,
+    max_sentence_silence: 800,
   };
   resources?: {
     resource_id: string;    // 热词ID，此次语音识别中生效此热词ID对应的热词信息。默认不启用。需和resource_type参数配合使用。注：resource_id对应SDK中的phrase_id字段，phrase_id为v1版本模型热词方案，不支持v2及后续系列模型。
@@ -137,7 +154,7 @@ export class GummyConfig implements AsrConfig {
     translation_enabled: true,
     source_language: "zh",
     translation_target_languages: ["en"], // 仅仅支持输出一种语言翻译，不支持多种！
-    max_end_silence: 500,
+    max_end_silence: 1200,
   };
 }
 
@@ -177,6 +194,9 @@ export class AliAsrService {
     const actualSampleRate = MicrophoneStreamModule.getSampleRate();
     console.log(`Microphone actual sample rate: ${actualSampleRate} Hz`);
     this.config.parameters.sample_rate = actualSampleRate;
+    if (FANYAN_LIST.includes(this.config.parameters.translation_target_languages?.[0])) {
+      this.config.parameters.translation_target_languages = ["zh"];
+    }
   }
   
   /**
@@ -308,8 +328,8 @@ export class AliAsrService {
           reject(error); // 如果发生错误，reject Promise
         };
         
-        this.socket.onclose = () => {
-          console.log("[asr] WebSocket connection closed.");
+        this.socket.onclose = (event) => {
+          console.log(`[asr] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
           this.isConnected = false;
           if (!this.isTaskStarted) {
             reject(new Error("[asr] WebSocket closed before task started."));
