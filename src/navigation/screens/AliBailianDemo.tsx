@@ -591,6 +591,7 @@ export const AliBailianDemo = () => {
               actions={languageOptions}
               onSelect={(lang) => setTargetLanguage(lang)}
               value={targetLanguage}
+              disabled={isProcessing}
             >
               <TouchableOpacity style={styles.languageButton}>
                 <Text style={styles.languageButtonText}>
@@ -649,6 +650,7 @@ export const AliBailianDemo = () => {
                 actions={yinseOptions}
                 onSelect={(v) => setVoice(v)}
                 value={voice}
+                disabled={isProcessing}
               >
                 <TouchableOpacity style={styles.titleLanguageButton}>
                   <Text style={styles.titleLanguageButtonText}>
