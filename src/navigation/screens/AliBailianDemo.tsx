@@ -637,10 +637,7 @@ export const AliBailianDemo = () => {
       {/* TTS Section */}
       <View style={styles.section}>
         {/* TTS Collapsible Header */}
-        <TouchableOpacity 
-          style={styles.collapsibleHeader} 
-          onPress={() => setIsTtsCollapsed(!isTtsCollapsed)}
-        >
+        <View style={styles.collapsibleHeader}>
           <View style={styles.titleWithLanguage}>
             <Text style={styles.title}>TTS</Text>
             
@@ -661,13 +658,16 @@ export const AliBailianDemo = () => {
             </View>
           </View>
           
-          {/* Collapse/Expand Icon */}
-          <View style={styles.collapseIconContainer}>
+          {/* Collapse/Expand Icon - Only this area will trigger collapse/expand */}
+          <TouchableOpacity 
+            style={styles.collapseIconContainer}
+            onPress={() => setIsTtsCollapsed(!isTtsCollapsed)}
+          >
             <Text style={styles.collapseIcon}>
               {isTtsCollapsed ? "▼" : "▲"}
             </Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
         
         {/* Collapsible TTS Content */}
         {!isTtsCollapsed && (

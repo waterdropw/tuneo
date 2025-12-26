@@ -89,7 +89,7 @@ export class FunConfig implements AsrConfig {
     heartbeat: false,
     semantic_punctuation_enabled: false,
     multi_threshold_mode_enabled: false,
-    max_sentence_silence: 1300,
+    max_sentence_silence: 800,
   };
 }
 
@@ -154,7 +154,7 @@ export class GummyConfig implements AsrConfig {
     translation_enabled: true,
     source_language: "zh",
     translation_target_languages: ["en"], // 仅仅支持输出一种语言翻译，不支持多种！
-    max_end_silence: 1200,
+    max_end_silence: 800,
   };
 }
 
