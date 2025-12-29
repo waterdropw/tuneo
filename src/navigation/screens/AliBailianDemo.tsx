@@ -192,7 +192,7 @@ export const AliBailianDemo = () => {
       }
       
       // Play the file
-      const sound = new Sound(path, '', (error) => {
+      const sound = new Sound(path, undefined, (error) => {
         if (error) {
           console.log('加载失败', error)
           setIsTtsProcessing(false)
