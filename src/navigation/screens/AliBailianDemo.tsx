@@ -306,21 +306,16 @@ export const AliBailianDemo = () => {
     
     // Set up audio callback for TTS service
     ttsService.setAudioCallback((audioData, metadata) => {
-      console.log("Received TTS audio data:", audioData ? audioData.byteLength : "end")
+      console.log("Received TTS audio data:", metadata)
       
-      if (audioData) {
-        // Convert ArrayBuffer to Uint8Array and add to buffer
-        audioDataBuffer.current.push(new Uint8Array(audioData))
-        
-        // If we have enough data and not already playing, start playing incrementally
-        if (audioDataBuffer.current.length >= 2 && !isPlaying.current) {
-          playAudioBuffer()
-        }
-      } else {
+      if (metadata?.isFinal) {
         // Audio stream ended
         isAudioComplete.current = true
-        // Play the final complete audio
+        // Auto play audio when synthesis is finished
         playAudioBuffer()
+      } else if (audioData) {
+        // Convert ArrayBuffer to Uint8Array and add to buffer
+        audioDataBuffer.current.push(new Uint8Array(audioData))
       }
     })
     
@@ -346,7 +341,7 @@ export const AliBailianDemo = () => {
           setTtsStatus("TTS synthesis finished")
           setIsTtsProcessing(false)
           // Auto play audio when synthesis is finished
-          playAudioBuffer()
+          // playAudioBuffer()
           break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
@@ -408,7 +403,7 @@ export const AliBailianDemo = () => {
       // Check if we've already processed this result
       if (resultHash === processedResultHash) {
         console.log("Skipping duplicate TTS trigger for the same result");
-        return;
+        // return;
       }
       setIsTtsProcessing(true)
       setTtsStatus("Connecting to TTS service...");

@@ -213,7 +213,6 @@ export class AliAsrService {
         
         this.socket.onopen = () => {
           console.log("[asr] WebSocket connection established.");
-          console.log("WebSocket connection established.");
           this.isConnected = true;
           
           // 生成随机任务ID

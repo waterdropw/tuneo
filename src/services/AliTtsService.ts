@@ -1246,19 +1246,19 @@ export class AliTtsService {
     if (!this.isConnected || !this.isTaskStarted || !this.socket || !this.taskId) {
       throw new Error("TTS WebSocket is not connected or task has not started.");
     }
-        
+
     return new Promise((resolve, reject) => {
       // 设置超时处理
-      const timeoutId = setTimeout(() => {
-        console.error('[tts] Stop task timed out after 5 seconds');
-        reject(new Error('[tts] Stop task timed out'));
+      // const timeoutId = setTimeout(() => {
+      //   console.error('[tts] Stop task timed out after 5 seconds');
+      //   reject(new Error('[tts] Stop task timed out'));
         
-        // 超时后强制关闭连接
-        this.close();
-      }, 5000);
+      //   // 超时后强制关闭连接
+      //   this.close();
+      // }, 10000);
       
       this.resolveTaskFinished = () => {
-        clearTimeout(timeoutId);
+        // clearTimeout(timeoutId);
         resolve();
       };
       
