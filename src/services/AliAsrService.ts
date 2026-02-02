@@ -2,6 +2,56 @@
  * AliAsrService 类
  * 基于阿里云Paraformer实时语音识别API实现
  * 参考实现：https://github.com/aliyun/alibabacloud-bailian-speech-demo/blob/master/samples/gallery/paraformer-realtime-js/paraformer_realtime_api.js
+ * 
+ * ===== 重构说明 (v2.0) =====
+ * 
+ * 重构目的：分离WebSocket连接逻辑与任务消息逻辑，允许复用同一个WebSocket连接来多次发送run-task/finish-task消息对
+ * 
+ * API 层次设计：
+ * ┌─────────────────────────────────────────────────┐
+ * │ WebSocket 连接层（连接管理）                      │
+ * │ connect() - 打开WebSocket连接                   │
+ * │ disconnect() - 关闭WebSocket连接                │
+ * │ isConnected() - 检查WebSocket连接状态            │
+ * └─────────────────────────────────────────────────┘
+ *                        ↓
+ * ┌─────────────────────────────────────────────────┐
+ * │ ASR 任务层（语音识别任务）                        │
+ * │ start() - 启动ASR任务（发送run-task）            │
+ * │ stop() - 停止ASR任务（发送finish-task）          │
+ * │ sendAudio() - 发送音频数据                       │
+ * │ isReady() - 检查任务是否就绪                     │
+ * └─────────────────────────────────────────────────┘
+ * 
+ * 核心改进：
+ * 1. connect()/disconnect() - WebSocket 连接管理
+ * 2. start()/stop() - ASR 任务管理
+ * 3. connect() 会自动创建连接，无需显式调用
+ * 4. 支持连接复用：多个 start()/stop() 对可复用同一连接
+ * 
+ * 典型使用流程 - 单次任务（简单场景，向后兼容）：
+ *   const asr = new AliAsrService(config);
+ *   await asr.start();              // 自动打开连接并启动任务
+ *   asr.sendAudio(audioData);       // 发送音频
+ *   await asr.stop();               // 停止任务
+ *   await asr.disconnect();         // 关闭连接
+ * 
+ * 典型使用流程 - 复用连接处理多个任务（高级场景）：
+ *   const asr = new AliAsrService(config);
+ *   await asr.connect();            // 打开WebSocket连接，保持打开
+ *   
+ *   // 第一个任务
+ *   await asr.start();              // 启动第一个ASR任务
+ *   asr.sendAudio(audioData1);      // 发送音频
+ *   await asr.stop();               // 停止第一个任务
+ *   
+ *   // 第二个任务 - 复用同一连接
+ *   await asr.start();              // 启动第二个ASR任务
+ *   asr.sendAudio(audioData2);      // 发送音频
+ *   await asr.stop();               // 停止第二个任务
+ *   
+ *   // 最后关闭连接
+ *   await asr.disconnect();         // 关闭连接
  */
 
 import MicrophoneStreamModule from "../../modules/microphone-stream";
@@ -168,9 +218,10 @@ export class AliAsrService {
   private wsUrl: string;
   private socket: WebSocket | null = null;
   private taskId: string = this.generateUUID();
-  private isConnected: boolean = false;
-  private isTaskStarted: boolean = false;
+  private isConnected: boolean = false;          // WebSocket连接状态
+  private isTaskStarted: boolean = false;        // 当前任务是否已启动
   private messageQueue: any[] = [];
+  private resolveConnectionOpened: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
   private resultCallback: ((result: Record<string, string>) => void) | null = null;
@@ -200,146 +251,190 @@ export class AliAsrService {
   }
   
   /**
-   * 连接到WebSocket服务并发送run-task消息
+   * 打开WebSocket连接（WebSocket 连接层）
+   * 仅处理连接逻辑，不发送任何任务消息
+   * 可以复用此连接来多次发送 run-task/finish-task 消息对
    * @returns Promise<void>
    */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.resolveTaskStarted = resolve;
+      // 如果已经连接，直接resolve
+      if (this.isConnected && this.socket) {
+        console.log('[asr] WebSocket already connected');
+        resolve();
+        return;
+      }
+
+      this.resolveConnectionOpened = resolve;
       
       try {
-        console.log('[asr] Connecting to WebSocket');
+        console.log('[asr] Opening WebSocket connection');
         this.socket = new WebSocket(this.wsUrl);
         
         this.socket.onopen = () => {
           console.log("[asr] WebSocket connection established.");
           this.isConnected = true;
           
-          // 生成随机任务ID
-          this.taskId = this.generateUUID();
-          
-          // 发送run-task消息
-          const runTaskMessage: WebSocketMessage = {
-            header: {
-              action: "run-task",
-              task_id: this.taskId,
-              streaming: "duplex"
-            },
-            payload: this.config
-          };
-          
-          this.socket?.send(JSON.stringify(runTaskMessage));
-          console.log('[asr] Sent message:', runTaskMessage);
+          if (this.resolveConnectionOpened) {
+            this.resolveConnectionOpened();
+          }
+          resolve();
         };
         
         this.socket.onmessage = (event) => {
-          const message = JSON.parse(event.data);
-          // console.log("[asr] Received message:", message);
-          
-          if (message.header.event === "task-started") {
-            this.isTaskStarted = true;
-            console.log('[asr] Received task-started');
-            if (this.resolveTaskStarted) {
-              this.resolveTaskStarted();
-            }
-            resolve(); // 在接收到task-started后resolve Promise
-          } else if (message.header.event === "task-finished") {
-            console.log('Received task-finished');
-            if (this.resolveTaskFinished) {
-              this.resolveTaskFinished();
-            }
-          } else if (message.header.event === 'result-generated') {
-            // console.log('[asr] Received result-generated:', JSON.stringify(message.payload));
-
-            // Handle different response formats based on model
-            let asrResult = "";
-            let translations: Record<string, string> = {};
-
-            // Extract ASR result - handle different formats
-            if (message.payload.output) {
-              if (message.payload.output.text) {
-                // Common format for gummy-realtime-v1
-                asrResult = message.payload.output.text;
-              } else if (message.payload.output.sentence?.text) {
-                // Legacy format
-                // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
-                if (message.payload.output.sentence.sentence_end) {
-                  asrResult = message.payload.output.sentence.text;
-                }
-              } else if (message.payload.output.transcription?.text) {
-                // Transcription format
-                // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
-                if (message.payload.output.transcription.sentence_end) {
-                  asrResult = message.payload.output.transcription.text;
-                }
-              }
-
-              // Extract translations
-              if (message.payload.output.translations) {
-                for (const translation of message.payload.output.translations) {
-                  // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
-                  if (translation.sentence_end) {
-                    translations[translation.lang || ""] = translation.text || "";
-                  }
-                }
-              } else if (message.payload.output.translation) {
-                // Handle gummy-realtime-v1 translation format if different
-                const translationOutput = message.payload.output.translation;
-                if (typeof translationOutput === 'object' && translationOutput !== null) {
-                  // 过滤出 sentence_end 为 true 的翻译
-                  const filteredTranslations = Object.fromEntries(
-                    Object.entries(translationOutput)
-                      .filter(([_, value]) => {
-                        // Type assertion to handle unknown type
-                        const typedValue = value as { sentence_end?: boolean };
-                        return typedValue?.sentence_end === true;
-                      })
-                  );
-                  Object.entries(filteredTranslations).forEach(([lang, translationObj]) => {
-                    // Check if translationObj has a text property and use that
-                    if (translationObj && typeof translationObj === 'object' && 'text' in translationObj) {
-                      // Type assertion to handle unknown type
-                      const typedTranslationObj = translationObj as { text?: string };
-                      translations[lang] = typedTranslationObj.text || "";
-                    }
-                  });
-                }
-              } else if (this.config.parameters.translation_target_languages[0] === "zh") {
-                // 返回识别结果，便于统一处理中文方言的TTS
-                translations["zh"] = asrResult;
-              }
-            }
-
-            // Call callbacks if we have results
-            if (asrResult && this.resultCallback) {
-              this.resultCallback({ asr: asrResult, ...translations });
-            }
-            
-            // Log if no results were extracted but we received a result-generated event
-            // if (!asrResult && Object.keys(translations).length === 0) {
-            //   console.warn('[asr] No results extracted from result-generated event:', message.payload);
-            // }
-          }
+          this._handleMessage(event);
         };
         
         this.socket.onerror = (error) => {
           console.error("[asr] WebSocket error:", error);
-          reject(error); // 如果发生错误，reject Promise
+          this.isConnected = false;
+          reject(error);
         };
         
         this.socket.onclose = (event) => {
           console.log(`[asr] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
           this.isConnected = false;
-          if (!this.isTaskStarted) {
-            reject(new Error("[asr] WebSocket closed before task started."));
-          }
           this.isTaskStarted = false;
         };
       } catch (error) {
         console.error("[asr] Failed to initialize WebSocket:", error);
+        this.isConnected = false;
         reject(error);
       }
     });
+  }
+
+  /**
+   * 启动ASR任务（ASR 任务层）
+   * 发送 run-task 消息以启动一个新的识别任务
+   * 如果WebSocket连接还没有建立，会自动调用 connect()
+   * @returns Promise<void>
+   */
+  start(): Promise<void> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // 如果连接还没有建立，先建立连接
+        if (!this.isConnected || !this.socket) {
+          console.log('[asr] WebSocket not connected, opening connection first');
+          await this.connect();
+        }
+
+        this.resolveTaskStarted = resolve;
+        
+        // 生成随机任务ID
+        this.taskId = this.generateUUID();
+        
+        // 发送run-task消息
+        const runTaskMessage: WebSocketMessage = {
+          header: {
+            action: "run-task",
+            task_id: this.taskId,
+            streaming: "duplex"
+          },
+          payload: this.config
+        };
+        
+        this.socket?.send(JSON.stringify(runTaskMessage));
+        console.log('[asr] Sent run-task message:', runTaskMessage);
+      } catch (error) {
+        console.error("[asr] Failed to send run-task message:", error);
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * 处理WebSocket消息
+   * @private
+   */
+  private _handleMessage(event: MessageEvent): void {
+    const message = JSON.parse(event.data);
+    // console.log("[asr] Received message:", message);
+    
+    if (message.header.event === "task-started") {
+      this.isTaskStarted = true;
+      console.log('[asr] Received task-started for task:', message.header.task_id);
+      if (this.resolveTaskStarted) {
+        this.resolveTaskStarted();
+      }
+    } else if (message.header.event === "task-finished") {
+      console.log('[asr] Received task-finished for task:', message.header.task_id);
+      this.isTaskStarted = false;
+      if (this.resolveTaskFinished) {
+        this.resolveTaskFinished();
+      }
+    } else if (message.header.event === 'result-generated') {
+      // console.log('[asr] Received result-generated:', JSON.stringify(message.payload));
+
+      // Handle different response formats based on model
+      let asrResult = "";
+      let translations: Record<string, string> = {};
+
+      // Extract ASR result - handle different formats
+      if (message.payload.output) {
+        if (message.payload.output.text) {
+          // Common format for gummy-realtime-v1
+          asrResult = message.payload.output.text;
+        } else if (message.payload.output.sentence?.text) {
+          // Legacy format
+          // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
+          if (message.payload.output.sentence.sentence_end) {
+            asrResult = message.payload.output.sentence.text;
+          }
+        } else if (message.payload.output.transcription?.text) {
+          // Transcription format
+          // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
+          if (message.payload.output.transcription.sentence_end) {
+            asrResult = message.payload.output.transcription.text;
+          }
+        }
+
+        // Extract translations
+        if (message.payload.output.translations) {
+          for (const translation of message.payload.output.translations) {
+            // 只处理 sentence_end 为 true 的翻译,避免获得重复翻译结果
+            if (translation.sentence_end) {
+              translations[translation.lang || ""] = translation.text || "";
+            }
+          }
+        } else if (message.payload.output.translation) {
+          // Handle gummy-realtime-v1 translation format if different
+          const translationOutput = message.payload.output.translation;
+          if (typeof translationOutput === 'object' && translationOutput !== null) {
+            // 过滤出 sentence_end 为 true 的翻译
+            const filteredTranslations = Object.fromEntries(
+              Object.entries(translationOutput)
+                .filter(([_, value]) => {
+                  // Type assertion to handle unknown type
+                  const typedValue = value as { sentence_end?: boolean };
+                  return typedValue?.sentence_end === true;
+                })
+            );
+            Object.entries(filteredTranslations).forEach(([lang, translationObj]) => {
+              // Check if translationObj has a text property and use that
+              if (translationObj && typeof translationObj === 'object' && 'text' in translationObj) {
+                // Type assertion to handle unknown type
+                const typedTranslationObj = translationObj as { text?: string };
+                translations[lang] = typedTranslationObj.text || "";
+              }
+            });
+          }
+        } else if (this.config.parameters.translation_target_languages[0] === "zh") {
+          // 返回识别结果，便于统一处理中文方言的TTS
+          translations["zh"] = asrResult;
+        }
+      }
+
+      // Call callbacks if we have results
+      if (asrResult && this.resultCallback) {
+        this.resultCallback({ asr: asrResult, ...translations });
+      }
+      
+      // Log if no results were extracted but we received a result-generated event
+      // if (!asrResult && Object.keys(translations).length === 0) {
+      //   console.warn('[asr] No results extracted from result-generated event:', message.payload);
+      // }
+    }
   }
   
   /**
@@ -359,37 +454,47 @@ export class AliAsrService {
   }
   
   /**
-   * 停止任务并等待task-finished消息
+   * 发送finish-task消息以结束当前识别任务
+   * 仅停止当前任务，不关闭WebSocket连接
+   * 连接保持打开状态，可以再次调用 connect() 来启动新的识别任务
    * @returns Promise<void>
    */
   stop(): Promise<void> {
     if (!this.isConnected || !this.isTaskStarted || !this.socket || !this.taskId) {
-      throw new Error("WebSocket is not connected or task has not started.");
+      throw new Error("[asr] WebSocket is not connected or task has not started.");
     }
     
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.resolveTaskFinished = resolve;
       
-      const finishTaskMessage: WebSocketMessage = {
-        header: {
-          action: "finish-task",
-          task_id: this.taskId,
-          streaming: "duplex"
-        },
-        payload: {
-          input: {}
-        }
-      };
-      
-      this.socket?.send(JSON.stringify(finishTaskMessage));
-      console.log('[asr] Sent message:', finishTaskMessage);
+      try {
+        const finishTaskMessage: WebSocketMessage = {
+          header: {
+            action: "finish-task",
+            task_id: this.taskId,
+            streaming: "duplex"
+          },
+          payload: {
+            input: {}
+          }
+        };
+        
+        this.socket?.send(JSON.stringify(finishTaskMessage));
+        console.log('[asr] Sent finish-task message:', finishTaskMessage);
+      } catch (error) {
+        console.error("[asr] Failed to send finish-task message:", error);
+        reject(error);
+      }
     });
   }
   
   /**
-   * 关闭WebSocket连接
+   * 关闭WebSocket连接（WebSocket 连接层）
+   * 这将断开与服务器的连接，无法再发送任何消息
+   * 如果需要再次使用，需要重新调用 connect()
    */
-  close(): void {
+  disconnect(): void {
+    console.log('[asr] Closing WebSocket connection');
     if (this.socket) {
       this.socket.close();
       this.socket = null;
@@ -397,6 +502,22 @@ export class AliAsrService {
     
     this.isConnected = false;
     this.isTaskStarted = false;
+  }
+
+  /**
+   * 关闭WebSocket连接（已废弃，请使用 disconnect()）
+   * @deprecated 使用 disconnect() 替代
+   */
+  closeConnection(): void {
+    this.disconnect();
+  }
+
+  /**
+   * 关闭WebSocket连接（已废弃，请使用 disconnect()）
+   * @deprecated 使用 disconnect() 替代
+   */
+  close(): void {
+    this.disconnect();
   }
   
   /**
@@ -428,8 +549,25 @@ export class AliAsrService {
   }
   
   /**
-   * 获取连接状态
+   * 检查WebSocket连接是否已打开（WebSocket 连接层）
    * @returns 是否已连接
+   */
+  isConnectionOpen(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * 检查WebSocket连接是否已打开（已废弃，请使用 isConnectionOpen()）
+   * @deprecated 使用 isConnectionOpen() 替代
+   * @returns 是否已连接
+   */
+  isConnectionReady(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * 检查当前任务是否已启动并准备好接收音频（ASR 任务层）
+   * @returns 是否任务已启动
    */
   isReady(): boolean {
     return this.isConnected && this.isTaskStarted;

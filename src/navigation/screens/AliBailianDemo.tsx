@@ -408,9 +408,14 @@ export const AliBailianDemo = () => {
         audioProcessorRef.current.stopProcessing()
       }
       if (asrServiceRef.current) {
-        // Ensure we close the connection if it's still open
+        // Ensure we close the task and connection if they're still open
         try {
-          asrServiceRef.current.stop().catch(console.error)
+          // First try to stop the task if it's running
+          if (asrServiceRef.current.isReady()) {
+            asrServiceRef.current.stop().catch(console.error)
+          }
+          // Then close the WebSocket connection
+          asrServiceRef.current.disconnect()
         } catch (error) {
           console.error("Error stopping ASR service:", error)
         }
@@ -507,10 +512,15 @@ export const AliBailianDemo = () => {
     setTtsStatus("Ready")
     
     try {
-      // Connect to ASR service
+      // Connect to ASR service (open WebSocket connection)
       console.log("Connecting to ASR service...")
       await asrService.connect()
       console.log("ASR service connected successfully")
+      
+      // Start ASR task (send run-task message)
+      console.log("Starting ASR task...")
+      await asrService.start()
+      console.log("ASR task started successfully")
       
       // Start audio processing with callback to send audio to ASR service
       audioProcessor.startProcessing((processedData) => {
@@ -548,9 +558,15 @@ export const AliBailianDemo = () => {
       audioProcessor.stopProcessing()
       console.log("Audio processing stopped")
       
-      // Then stop ASR service
-      await asrService.stop()
-      console.log("ASR service stopped")
+      // Then stop ASR task
+      if (asrService.isReady()) {
+        await asrService.stop()
+        console.log("ASR task stopped")
+      }
+      
+      // Finally close the WebSocket connection
+      asrService.disconnect()
+      console.log("ASR connection closed")
       
     } catch (error) {
       console.error("Failed to stop processing:", error)
