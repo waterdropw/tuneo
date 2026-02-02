@@ -158,10 +158,12 @@ export const AliBailianDemo = () => {
   // Play audio from buffer - 使用useCallback确保引用稳定
   const playAudioBuffer = useCallback(async () => {
     if (audioDataBuffer.current.length === 0) {
-      setPlaybackStatus("No audio data to play")
+      console.log("[playAudioBuffer] No audio data to play")
+      setPlaybackStatus("stopped")
       return
     }
     
+    console.log(`[playAudioBuffer] Starting playback with ${audioDataBuffer.current.length} chunks`)
     setPlaybackStatus("playing")
     isPlaying.current = true
     
@@ -175,48 +177,67 @@ export const AliBailianDemo = () => {
         offset += chunk.byteLength
       }
       
+      console.log(`[playAudioBuffer] Combined buffer size: ${combinedBuffer.byteLength} bytes`)
+      
       // Convert Uint8Array to base64 string
       const base64Data = btoa(String.fromCharCode(...combinedBuffer))
       
-      // Write to temporary file
-      const path = `${FileSystem.cacheDirectory}temp_audio.mp3`
+      // Write to temporary file with unique name to avoid conflicts
+      const timestamp = Date.now()
+      const path = `${FileSystem.cacheDirectory}temp_audio_${timestamp}.mp3`
       
       await FileSystem.writeAsStringAsync(path, base64Data, {
         encoding: FileSystem.EncodingType.Base64
       })
       
+      console.log(`[playAudioBuffer] Audio file written to: ${path}`)
+      
       // If sound is already playing, stop it first
       if (soundRef.current) {
+        console.log("[playAudioBuffer] Stopping previous playback")
         soundRef.current.stop()
         soundRef.current.release()
+        soundRef.current = null
       }
+      
+      // 清空缓冲区，避免下次播放时重复
+      audioDataBuffer.current = []
+      console.log("[playAudioBuffer] Audio buffer cleared after playback")
       
       // Play the file
       const sound = new Sound(path, undefined, (error) => {
         if (error) {
-          console.log('加载失败', error)
+          console.error('[playAudioBuffer] Failed to load audio:', error)
           setIsTtsProcessing(false)
           setPlaybackStatus("stopped")
           isPlaying.current = false
+          // 清理失败的临时文件
+          FileSystem.deleteAsync(path, { idempotent: true }).catch(console.error)
           return
         }
-        sound.play(() => {
+        console.log("[playAudioBuffer] Audio loaded successfully, starting playback")
+        sound.play((success) => {
+          console.log(`[playAudioBuffer] Playback finished, success: ${success}`)
           sound.release()
           soundRef.current = null
-          if (isAudioComplete.current) {
-            setPlaybackStatus("stopped")
-            setIsTtsProcessing(false)
-            isPlaying.current = false
-          }
+          setPlaybackStatus("stopped")
+          setIsTtsProcessing(false)
+          isPlaying.current = false
+          
+          // 清理播放完成的临时文件
+          FileSystem.deleteAsync(path, { idempotent: true }).catch(console.error)
         })
       })
       
       soundRef.current = sound
       
     } catch (error) {
-      console.error("Failed to play audio:", error)
+      console.error("[playAudioBuffer] Failed to play audio:", error)
       setPlaybackStatus("stopped")
       isPlaying.current = false
+      setIsTtsProcessing(false)
+      // 清空缓冲区以避免下次尝试播放损坏的数据
+      audioDataBuffer.current = []
     }
   }, [])
 
@@ -306,16 +327,19 @@ export const AliBailianDemo = () => {
     
     // Set up audio callback for TTS service
     ttsService.setAudioCallback((audioData, metadata) => {
-      console.log("Received TTS audio data:", metadata)
+      // console.log("Received TTS audio data:", metadata)
       
       if (metadata?.isFinal) {
         // Audio stream ended
+        console.log(`[TTS Audio Callback] Audio stream ended. Buffer has ${audioDataBuffer.current.length} chunks`)
         isAudioComplete.current = true
         // Auto play audio when synthesis is finished
         playAudioBuffer()
       } else if (audioData) {
         // Convert ArrayBuffer to Uint8Array and add to buffer
-        audioDataBuffer.current.push(new Uint8Array(audioData))
+        const chunk = new Uint8Array(audioData)
+        audioDataBuffer.current.push(chunk)
+        console.log(`[TTS Audio Callback] Received chunk ${audioDataBuffer.current.length}, size: ${chunk.byteLength} bytes`)
       }
     })
     
@@ -328,24 +352,36 @@ export const AliBailianDemo = () => {
     
     // Set up event callback for TTS service
     ttsService.setEventCallback((event, data) => {
-      console.log("TTS event:", event, data)
+      console.log("[TTS Event]", event, data)
       switch (event) {
         case "task-started":
           setIsTtsProcessing(true)
           setTtsStatus("TTS synthesis started")
+          // 停止当前播放的音频（如果有）
+          if (soundRef.current) {
+            console.log("[TTS Event] Stopping previous playback before new synthesis")
+            soundRef.current.stop()
+            soundRef.current.release()
+            soundRef.current = null
+          }
           // Reset audio buffer and status - 确保在开始合成时清空缓冲区
+          console.log(`[TTS Event] Clearing buffer (had ${audioDataBuffer.current.length} chunks) for new synthesis`)
           audioDataBuffer.current = []
           isAudioComplete.current = false
+          setPlaybackStatus("stopped")
           break
         case "task-finished":
           setTtsStatus("TTS synthesis finished")
-          setIsTtsProcessing(false)
-          // Auto play audio when synthesis is finished
-          // playAudioBuffer()
+          // 注意：不在这里设置 setIsTtsProcessing(false)，因为可能还在播放中
+          // 播放完成后会自动设置为 false
+          console.log("[TTS Event] Synthesis finished, waiting for playback to complete")
           break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
           setIsTtsProcessing(false)
+          // 清空缓冲区
+          audioDataBuffer.current = []
+          isAudioComplete.current = false
           break
       }
     })
@@ -389,11 +425,11 @@ export const AliBailianDemo = () => {
     const triggerTTS = async () => {
       const ttsService = ttsServiceRef.current;
       if (!ttsService) {
-        console.error("TTS service not initialized");
+        console.error("[Auto TTS] TTS service not initialized");
         return;
       }
       if (!resultPairs.length || resultPairs.length < 2) {
-        console.error("No ASR result to synthesize");
+        // console.log("[Auto TTS] No sufficient ASR result to synthesize");
         return;
       }
       
@@ -402,28 +438,33 @@ export const AliBailianDemo = () => {
       
       // Check if we've already processed this result
       if (resultHash === processedResultHash) {
-        console.log("Skipping duplicate TTS trigger for the same result");
-        // return;
+        console.log("[Auto TTS] Skipping duplicate TTS trigger for the same result");
+        return; // 修复：实际跳过重复触发
       }
+      
+      console.log("[Auto TTS] Triggering TTS synthesis for new ASR result");
       setIsTtsProcessing(true)
       setTtsStatus("Connecting to TTS service...");
       
       try {
         // Connect to TTS service
         await ttsService.connect();
-        console.log("TTS service connected successfully for auto-trigger");
+        console.log("[Auto TTS] TTS service connected successfully");
         
         // Send resultPairs[1] text for synthesis, if empty send resultPairs[0]
         const textToSynthesize = resultPairs[1].value.trim();
         ttsService.sendText(textToSynthesize, true);
-        console.log("ASR text sent for synthesis:", textToSynthesize);
+        console.log("[Auto TTS] Text sent for synthesis:", textToSynthesize);
         
         // Update the processed hash to avoid duplicate triggers
         setProcessedResultHash(resultHash);
       } catch (error) {
-        console.error("Failed to auto-trigger TTS synthesis:", error);
+        console.error("[Auto TTS] Failed to trigger TTS synthesis:", error);
         setTtsStatus(`Failed to auto-trigger TTS: ${error instanceof Error ? error.message : String(error)}`);
         setIsTtsProcessing(false)
+        // 清空缓冲区以避免播放损坏的数据
+        audioDataBuffer.current = []
+        isAudioComplete.current = false
       }
     };
     
@@ -509,7 +550,7 @@ export const AliBailianDemo = () => {
     const ttsService = ttsServiceRef.current
     
     if (!ttsService) {
-      console.error("TTS service not initialized")
+      console.error("[Manual TTS] TTS service not initialized")
       return
     }
     
@@ -518,22 +559,26 @@ export const AliBailianDemo = () => {
       return
     }
     
+    console.log("[Manual TTS] Starting TTS synthesis")
     setIsTtsProcessing(true)
     setTtsStatus("Connecting to TTS service...")
     
     try {
       // Connect to TTS service
       await ttsService.connect()
-      console.log("TTS service connected successfully")
+      console.log("[Manual TTS] TTS service connected successfully")
       
       // Send text for synthesis
       ttsService.sendText(ttsText, true)
-      console.log("Text sent for synthesis")
+      console.log("[Manual TTS] Text sent for synthesis:", ttsText)
       
     } catch (error) {
-      console.error("Failed to start TTS synthesis:", error)
+      console.error("[Manual TTS] Failed to start TTS synthesis:", error)
       setTtsStatus(`Failed to start TTS synthesis: ${error instanceof Error ? error.message : String(error)}`)
       setIsTtsProcessing(false)
+      // 清空缓冲区以避免播放损坏的数据
+      audioDataBuffer.current = []
+      isAudioComplete.current = false
     }
   }
   
@@ -543,24 +588,37 @@ export const AliBailianDemo = () => {
     
     if (!ttsService) return
     
+    console.log("[TTS Stop] Stopping TTS synthesis and playback")
+    
     try {
-      await ttsService.stop()
-      // Clear audio buffer
-      audioDataBuffer.current = []
-      isAudioComplete.current = false
-      // Stop playback if active
+      // Stop playback first if active
       if (soundRef.current) {
+        console.log("[TTS Stop] Stopping audio playback")
         soundRef.current.stop()
         soundRef.current.release()
         soundRef.current = null
       }
+      
+      // Then stop TTS service
+      await ttsService.stop()
+      
+      // Clear audio buffer
+      console.log(`[TTS Stop] Clearing audio buffer (had ${audioDataBuffer.current.length} chunks)`)
+      audioDataBuffer.current = []
+      isAudioComplete.current = false
+      
       setIsTtsProcessing(false)
       setTtsStatus("TTS synthesis stopped")
       setPlaybackStatus("stopped")
+      console.log("[TTS Stop] TTS stopped successfully")
     } catch (error) {
-      console.error("Failed to stop TTS synthesis:", error)
+      console.error("[TTS Stop] Failed to stop TTS synthesis:", error)
       setTtsStatus(`Failed to stop TTS synthesis: ${error instanceof Error ? error.message : String(error)}`)
       setIsTtsProcessing(false)
+      // 即使失败也清空缓冲区
+      audioDataBuffer.current = []
+      isAudioComplete.current = false
+      setPlaybackStatus("stopped")
     }
   }
   
