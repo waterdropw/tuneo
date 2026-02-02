@@ -5,6 +5,7 @@ import { Settings } from "./screens/Settings"
 import { Tuneo } from "./screens/Tuneo"
 import { Avatar } from "./screens/Avatar"
 import { AliBailianDemo } from "./screens/AliBailianDemo"
+import { BilingualTranslationDemo } from "./screens/BilingualTranslationDemo"
 import Colors from "@/colors"
 import { CloseButton } from "@/components/CloseButton"
 import { Platform } from "react-native"
@@ -22,6 +23,16 @@ const RootStack = createNativeStackNavigator({
       screen: Avatar,
       options: {
         headerShown: false,
+      },
+    },
+    bilingual: {
+      screen: BilingualTranslationDemo,
+      options: {
+        title: "Bilingual Translation",
+        headerTitleStyle: { color: Colors.primary },
+        headerStyle: { backgroundColor: Colors.bgTitle },
+        headerTintColor: Colors.primary,
+        headerShadowVisible: false,
       },
     },
     asr: {
