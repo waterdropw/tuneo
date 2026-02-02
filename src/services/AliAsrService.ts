@@ -55,17 +55,7 @@
  */
 
 import MicrophoneStreamModule from "../../modules/microphone-stream";
-
-// 私有：定义WebSocket消息类型
-interface WebSocketMessage {
-  header: {
-    action?: string;
-    event?: string;
-    task_id?: string;
-    streaming?: string;
-  };
-  payload: any;
-}
+import { BaseWebSocketService, WebSocketMessage, ServiceConfig } from "./BaseWebSocketService";
 
 // 定义配置选项类型
 export interface AsrConfig {  
@@ -212,17 +202,9 @@ export class GummyConfig implements AsrConfig {
 /**
  * 实时语音识别处理器
  */
-export class AliAsrService {
-  private config: AsrConfig;
-
-  private wsUrl: string;
-  private socket: WebSocket | null = null;
-  private taskId: string = this.generateUUID();
-  private isConnected: boolean = false;          // WebSocket连接状态
-  private isTaskStarted: boolean = false;        // 当前任务是否已启动
+export class AliAsrService extends BaseWebSocketService {
+  protected config: AsrConfig;
   private messageQueue: any[] = [];
-  private resolveConnectionOpened: ((value: void | PromiseLike<void>) => void) | null = null;
-  private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
   private resultCallback: ((result: Record<string, string>) => void) | null = null;
   private errorCallback: ((error: Error) => void) | null = null;
@@ -235,11 +217,8 @@ export class AliAsrService {
    * @param config 配置选项
    */
   constructor(config: AsrConfig) {
-    const apiKey = process.env.EXPO_PUBLIC_DASHSCOPE_API_KEY || process.env.DASHSCOPE_API_KEY || '';
-    if (!apiKey) {
-      throw new Error("DASHSCOPE_API_KEY is not set in environment variables.");
-    }
-    this.wsUrl = `wss://dashscope.aliyuncs.com/api-ws/v1/inference?api_key=${apiKey}`;
+    super(config);
+    
     this.config = config;
     // 获取并验证实际采样率
     const actualSampleRate = MicrophoneStreamModule.getSampleRate();
@@ -249,59 +228,28 @@ export class AliAsrService {
       this.config.parameters.translation_target_languages = ["zh"];
     }
   }
+
+  /**
+   * 获取服务名称（用于日志）
+   */
+  protected getServiceName(): string {
+    return "asr";
+  }
   
   /**
-   * 打开WebSocket连接（WebSocket 连接层）
-   * 仅处理连接逻辑，不发送任何任务消息
-   * 可以复用此连接来多次发送 run-task/finish-task 消息对
-   * @returns Promise<void>
+   * 处理 WebSocket 消息（实现抽象方法）
    */
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // 如果已经连接，直接resolve
-      if (this.isConnected && this.socket) {
-        console.log('[asr] WebSocket already connected');
-        resolve();
-        return;
-      }
+  protected onMessage(event: MessageEvent): void {
+    this._handleMessage(event);
+  }
 
-      this.resolveConnectionOpened = resolve;
-      
-      try {
-        console.log('[asr] Opening WebSocket connection');
-        this.socket = new WebSocket(this.wsUrl);
-        
-        this.socket.onopen = () => {
-          console.log("[asr] WebSocket connection established.");
-          this.isConnected = true;
-          
-          if (this.resolveConnectionOpened) {
-            this.resolveConnectionOpened();
-          }
-          resolve();
-        };
-        
-        this.socket.onmessage = (event) => {
-          this._handleMessage(event);
-        };
-        
-        this.socket.onerror = (error) => {
-          console.error("[asr] WebSocket error:", error);
-          this.isConnected = false;
-          reject(error);
-        };
-        
-        this.socket.onclose = (event) => {
-          console.log(`[asr] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
-          this.isConnected = false;
-          this.isTaskStarted = false;
-        };
-      } catch (error) {
-        console.error("[asr] Failed to initialize WebSocket:", error);
-        this.isConnected = false;
-        reject(error);
-      }
-    });
+  /**
+   * 处理错误（实现抽象方法）
+   */
+  protected handleError(error: Error): void {
+    if (this.errorCallback) {
+      this.errorCallback(error);
+    }
   }
 
   /**
@@ -344,10 +292,13 @@ export class AliAsrService {
   }
 
   /**
-   * 处理WebSocket消息
+   * 处理 WebSocket 文本消息
    * @private
    */
   private _handleMessage(event: MessageEvent): void {
+    if (typeof event.data !== 'string') {
+      return;
+    }
     const message = JSON.parse(event.data);
     // console.log("[asr] Received message:", message);
     
@@ -489,22 +440,6 @@ export class AliAsrService {
   }
   
   /**
-   * 关闭WebSocket连接（WebSocket 连接层）
-   * 这将断开与服务器的连接，无法再发送任何消息
-   * 如果需要再次使用，需要重新调用 connect()
-   */
-  disconnect(): void {
-    console.log('[asr] Closing WebSocket connection');
-    if (this.socket) {
-      this.socket.close();
-      this.socket = null;
-    }
-    
-    this.isConnected = false;
-    this.isTaskStarted = false;
-  }
-
-  /**
    * 关闭WebSocket连接（已废弃，请使用 disconnect()）
    * @deprecated 使用 disconnect() 替代
    */
@@ -520,17 +455,6 @@ export class AliAsrService {
     this.disconnect();
   }
   
-  /**
-   * 生成UUID
-   * @returns UUID字符串
-   */
-  private generateUUID(): string {
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
   
   /**
    * 设置结果回调
@@ -549,35 +473,11 @@ export class AliAsrService {
   }
   
   /**
-   * 检查WebSocket连接是否已打开（WebSocket 连接层）
-   * @returns 是否已连接
-   */
-  isConnectionOpen(): boolean {
-    return this.isConnected;
-  }
-
-  /**
    * 检查WebSocket连接是否已打开（已废弃，请使用 isConnectionOpen()）
    * @deprecated 使用 isConnectionOpen() 替代
    * @returns 是否已连接
    */
   isConnectionReady(): boolean {
-    return this.isConnected;
-  }
-
-  /**
-   * 检查当前任务是否已启动并准备好接收音频（ASR 任务层）
-   * @returns 是否任务已启动
-   */
-  isReady(): boolean {
-    return this.isConnected && this.isTaskStarted;
-  }
-  
-  /**
-   * 获取当前任务ID
-   * @returns 任务ID
-   */
-  getTaskId(): string | null {
-    return this.taskId;
+    return this.isConnectionOpen();
   }
 }

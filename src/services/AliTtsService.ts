@@ -5,18 +5,9 @@
  * https://github.com/aliyun/alibabacloud-bailian-speech-demo/blob/master/samples/gallery/cosyvoice-js/cosyvoice_api.js
  */
 
-const DEFAULT_VOICE = 'loongcindy_v2';
+import { BaseWebSocketService, WebSocketMessage, ServiceConfig } from "./BaseWebSocketService";
 
-// 私有：定义WebSocket消息类型
-interface WebSocketMessage {
-  header: {
-    action?: string;
-    event?: string;
-    task_id?: string;
-    streaming?: string;
-  };
-  payload: any;
-}
+const DEFAULT_VOICE = 'loongcindy_v2';
 
 // 定义配置选项类型
 export interface TtsConfig {
@@ -1025,19 +1016,12 @@ export type TtsEventCallback = (
  *   // 最后关闭连接
  *   tts.disconnect();               // 关闭连接
  */
-export class AliTtsService {
-  private config: TtsConfig;
+export class AliTtsService extends BaseWebSocketService {
+  protected config: TtsConfig;
 
-  private wsUrl: string;
-  private socket: WebSocket | null = null;
-  private taskId: string = this.generateUUID();
-  private isConnected: boolean = false;          // WebSocket连接状态
-  private isTaskStarted: boolean = false;        // 当前任务是否已启动
   private isTaskFinished: boolean = false;
   private isAudioEndNotified: boolean = false; // 标志位，避免重复发送音频结束通知
   private messageQueue: any[] = [];
-  private resolveConnectionOpened: ((value: void | PromiseLike<void>) => void) | null = null;
-  private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
   
   // 超时管理
@@ -1055,11 +1039,8 @@ export class AliTtsService {
    * @param config 配置选项
    */
   constructor(config: TtsConfig) {
-    const apiKey = process.env.EXPO_PUBLIC_DASHSCOPE_API_KEY || process.env.DASHSCOPE_API_KEY || '';
-    if (!apiKey) {
-      throw new Error("DASHSCOPE_API_KEY is not set in environment variables.");
-    }
-    this.wsUrl = `wss://dashscope.aliyuncs.com/api-ws/v1/inference?api_key=${apiKey}`;
+    super(config);
+    
     this.config = config;
     const voice = this.config.parameters.voice || DEFAULT_VOICE;
     const yinseConfig = (YinseOptions as any)[voice];
@@ -1078,81 +1059,65 @@ export class AliTtsService {
   }
   
   /**
-   * 打开WebSocket连接（WebSocket 连接层）
-   * 仅处理连接逻辑，不发送任何任务消息
-   * 可以复用此连接来多次发送 run-task/finish-task 消息对
-   * @returns Promise<void>
+   * 获取服务名称（用于日志）
    */
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // 如果已经连接，直接resolve
-      if (this.isConnected && this.socket) {
-        console.log('[tts] WebSocket already connected');
-        resolve();
-        return;
-      }
+  protected getServiceName(): string {
+    return "tts";
+  }
 
-      this.resolveConnectionOpened = resolve;
-      
+  /**
+   * 处理 WebSocket 消息（实现抽象方法）
+   */
+  protected onMessage(event: MessageEvent): void {
+    // 处理二进制音频流和JSON事件
+    if (event.data instanceof ArrayBuffer) {
+      // 处理音频数据
+      this.handleAudioData(event.data);
+    } else if (typeof event.data === 'string') {
+      // 处理JSON事件
       try {
-        console.log('[tts] Opening WebSocket connection');
-        this.socket = new WebSocket(this.wsUrl);
-        this.socket.binaryType = 'arraybuffer'; // 明确设置二进制类型
-        
-        this.socket.onopen = () => {
-          console.log("[tts] WebSocket connection established.");
-          this.isConnected = true;
-          
-          if (this.resolveConnectionOpened) {
-            this.resolveConnectionOpened();
-          }
-          resolve();
-        };
-        
-        this.socket.onmessage = (event) => {
-          // 处理二进制音频流和JSON事件
-          if (event.data instanceof ArrayBuffer) {
-            // 处理音频数据
-            this.handleAudioData(event.data);
-          } else if (typeof event.data === 'string') {
-            // 处理JSON事件
-            try {
-              const message = JSON.parse(event.data);
-              // console.log("[tts] Received TTS message:", message);
-              this._handleMessage(message);
-            } catch (error) {
-              console.error("[tts] Failed to parse TTS message:", error, "Raw message:", event.data);
-              this.handleError(new Error(`[tts] Failed to parse message: ${error}`));
-            }
-          } else {
-            console.warn("[tts] Received unexpected message type:", typeof event.data);
-          }
-        };
-        
-        this.socket.onerror = (error) => {
-          const errorObj = error instanceof Error ? error : new Error(String(error));
-          console.error("[tts] WebSocket error:", errorObj);
-          this.isConnected = false;
-          this.handleError(errorObj);
-          reject(errorObj);
-        };
-        
-        this.socket.onclose = (event) => {
-          console.log(`[tts] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
-          this.isConnected = false;
-          this.isTaskStarted = false;
-          this.isTaskFinished = true;
-          // 通知音频结束
-          this.notifyAudioEnd();
-        };
+        const message = JSON.parse(event.data);
+        // console.log("[tts] Received TTS message:", message);
+        this._handleMessage(message);
       } catch (error) {
-        const errorObj = error instanceof Error ? error : new Error(String(error));
-        console.error("[tts] Failed to initialize TTS WebSocket:", errorObj);
-        this.isConnected = false;
-        this.handleError(errorObj);
-        reject(errorObj);
+        console.error("[tts] Failed to parse TTS message:", error, "Raw message:", event.data);
+        this.handleError(new Error(`[tts] Failed to parse message: ${error}`));
       }
-    });
+    } else {
+      console.warn("[tts] Received unexpected message type:", typeof event.data);
+    }
+  }
+
+  /**
+   * 重写基类的 setupSocketHandlers，添加 binaryType 设置
+   */
+  protected setupSocketHandlers(): void {
+    if (!this.socket) return;
+
+    // 设置二进制类型
+    this.socket.binaryType = 'arraybuffer';
+
+    // 设置事件处理器
+    this.socket.onopen = () => {
+      this.onConnectionOpened();
+    };
+
+    this.socket.onmessage = (event) => {
+      this.onMessage(event);
+    };
+
+    this.socket.onerror = (error) => {
+      this.onConnectionError(error);
+    };
+
+    this.socket.onclose = (event) => {
+      // 设置 TTS 特定状态
+      this.isTaskFinished = true;
+      // 通知音频结束
+      this.notifyAudioEnd();
+      // 调用基类的 onConnectionClosed
+      this.onConnectionClosed(event);
+    };
   }
 
   /**
@@ -1184,7 +1149,7 @@ export class AliTtsService {
           this.audioTimeoutTimer = null;
         }
         
-        // 生成随机任务ID
+        // 生成随机任务ID（使用基类的 generateUUID 方法）
         this.taskId = this.generateUUID();
         
         // 发送run-task消息
@@ -1383,28 +1348,16 @@ export class AliTtsService {
   
   /**
    * 关闭WebSocket连接（WebSocket 连接层）
-   * 这将断开与服务器的连接，无法再发送任何消息
-   * 如果需要再次使用，需要重新调用 connect()
+   * 重写基类方法以添加 TTS 特定的清理逻辑
    */
   disconnect(): void {
-    console.log('[tts] Closing WebSocket connection');
-    
     // 停止超时检测
     this.stopAudioTimeout();
     
-    // 关闭WebSocket连接
-    if (this.socket) {
-      try {
-        this.socket.close(1000, "Normal closure");
-      } catch (error) {
-        console.error('[tts] Failed to close WebSocket:', error);
-      }
-      this.socket = null;
-    }
+    // 调用基类的 disconnect
+    super.disconnect();
     
-    // 重置状态
-    this.isConnected = false;
-    this.isTaskStarted = false;
+    // 额外的 TTS 特定状态重置
     this.isTaskFinished = true;
   }
 
@@ -1425,17 +1378,6 @@ export class AliTtsService {
     this.lastAudioReceivedTime = 0;
   }
   
-  /**
-   * 生成UUID
-   * @returns UUID字符串
-   */
-  private generateUUID(): string {
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
   
   /**
    * 设置音频数据回调
@@ -1462,9 +1404,9 @@ export class AliTtsService {
   }
   
   /**
-   * 处理错误
+   * 处理错误（实现抽象方法）
    */
-  private handleError(error: Error): void {
+  protected handleError(error: Error): void {
     console.error("TTS error:", error);
     if (this.errorCallback) {
       this.errorCallback(error);
@@ -1528,27 +1470,4 @@ export class AliTtsService {
     }
   }
   
-  /**
-   * 检查WebSocket连接是否已打开（WebSocket 连接层）
-   * @returns 是否已连接
-   */
-  isConnectionOpen(): boolean {
-    return this.isConnected;
-  }
-
-  /**
-   * 检查当前任务是否已启动并准备好发送文本（TTS 任务层）
-   * @returns 是否任务已启动
-   */
-  isReady(): boolean {
-    return this.isConnected && this.isTaskStarted;
-  }
-  
-  /**
-   * 获取当前任务ID
-   * @returns 任务ID
-   */
-  getTaskId(): string | null {
-    return this.taskId;
-  }
 }
