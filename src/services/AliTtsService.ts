@@ -965,7 +965,7 @@ export type TtsErrorCallback = (
 ) => void;
 
 export type TtsEventCallback = (
-  event: "task-started" | "task-finished" | "error",
+  event: "task-started" | "task-finished" | "error" | "timeout",
   data?: any
 ) => void;
 
@@ -987,6 +987,11 @@ export class AliTtsService {
   private messageQueue: any[] = [];
   private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
+  
+  // 超时管理
+  private audioTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly AUDIO_TIMEOUT_MS: number = 5000; // 5秒超时
+  private lastAudioReceivedTime: number = 0;
   
   // 回调函数
   private audioCallback: TtsResultCallback | null = null;
@@ -1034,6 +1039,13 @@ export class AliTtsService {
       this.isTaskFinished = false;
       this.isAudioEndNotified = false; // 重置音频结束通知标志位
       this.messageQueue = [];
+      this.lastAudioReceivedTime = 0;
+      
+      // 清除旧的超时定时器
+      if (this.audioTimeoutTimer) {
+        clearTimeout(this.audioTimeoutTimer);
+        this.audioTimeoutTimer = null;
+      }
       
       try {
         console.log('[tts] Connecting to WebSocket service...');
@@ -1128,6 +1140,9 @@ export class AliTtsService {
       this.isTaskStarted = true;
       console.log('[tts] Received task-started event');
       
+      // 启动超时检测
+      this.startAudioTimeout();
+      
       // 通知任务开始
       this.notifyEvent("task-started");
       
@@ -1138,6 +1153,9 @@ export class AliTtsService {
       this.isTaskFinished = true;
       this.isTaskStarted = false;
       console.log('[tts] Received task-finished event');
+      
+      // 停止超时检测
+      this.stopAudioTimeout();
       
       // 通知任务结束
       this.notifyEvent("task-finished");
@@ -1162,6 +1180,12 @@ export class AliTtsService {
    * 处理音频数据
    */
   private handleAudioData(audioData: ArrayBuffer): void {
+    // 更新最后接收音频的时间
+    this.lastAudioReceivedTime = Date.now();
+    
+    // 重置超时定时器
+    this.resetAudioTimeout();
+    
     if (this.audioCallback) {
       this.audioCallback(audioData, {
         isFinal: this.isTaskFinished,
@@ -1279,7 +1303,7 @@ export class AliTtsService {
         console.log('[tts] Sent finish-task message:', finishTaskMessage);
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
-        clearTimeout(timeoutId);
+        // clearTimeout(timeoutId);
         console.error('[tts] Failed to send finish-task message:', errorObj);
         this.handleError(new Error(`[tts] Failed to send finish-task message: ${errorObj.message}`));
         reject(errorObj);
@@ -1292,6 +1316,9 @@ export class AliTtsService {
    */
   close(): void {
     console.log('[tts] Closing TTS WebSocket connection...');
+    
+    // 停止超时检测
+    this.stopAudioTimeout();
     
     // 清理回调函数引用，避免内存泄漏
     this.audioCallback = null;
@@ -1315,6 +1342,7 @@ export class AliTtsService {
     this.isTaskStarted = false;
     this.isTaskFinished = true;
     this.messageQueue = [];
+    this.lastAudioReceivedTime = 0;
   }
   
   /**
@@ -1364,9 +1392,57 @@ export class AliTtsService {
   }
   
   /**
+   * 启动音频超时检测
+   */
+  private startAudioTimeout(): void {
+    this.lastAudioReceivedTime = Date.now();
+    this.resetAudioTimeout();
+  }
+  
+  /**
+   * 重置音频超时定时器
+   */
+  private resetAudioTimeout(): void {
+    // 清除旧的定时器
+    if (this.audioTimeoutTimer) {
+      clearTimeout(this.audioTimeoutTimer);
+    }
+    
+    // 只有在任务进行中才设置超时
+    if (!this.isTaskStarted || this.isTaskFinished) {
+      return;
+    }
+    
+    // 设置新的定时器
+    this.audioTimeoutTimer = setTimeout(() => {
+      const timeSinceLastAudio = Date.now() - this.lastAudioReceivedTime;
+      console.warn(`[tts] Audio timeout triggered. No audio received for ${timeSinceLastAudio}ms`);
+      
+      // 通知超时事件
+      this.notifyEvent("timeout", {
+        message: `No audio data received for ${this.AUDIO_TIMEOUT_MS}ms`,
+        timeSinceLastAudio
+      });
+      
+      // 关闭连接
+      this.close();
+    }, this.AUDIO_TIMEOUT_MS);
+  }
+  
+  /**
+   * 停止音频超时检测
+   */
+  private stopAudioTimeout(): void {
+    if (this.audioTimeoutTimer) {
+      clearTimeout(this.audioTimeoutTimer);
+      this.audioTimeoutTimer = null;
+    }
+  }
+  
+  /**
    * 通知事件
    */
-  private notifyEvent(event: "task-started" | "task-finished" | "error", data?: any): void {
+  private notifyEvent(event: "task-started" | "task-finished" | "error" | "timeout", data?: any): void {
     if (this.eventCallback) {
       this.eventCallback(event, data);
     }

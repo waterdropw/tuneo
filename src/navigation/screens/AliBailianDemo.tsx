@@ -376,6 +376,21 @@ export const AliBailianDemo = () => {
           // 播放完成后会自动设置为 false
           console.log("[TTS Event] Synthesis finished, waiting for playback to complete")
           break
+        case "timeout":
+          console.warn("[TTS Event] TTS timeout detected, connection closed automatically")
+          setTtsStatus(`TTS Timeout: ${data?.message || "No audio data received"}`)
+          setIsTtsProcessing(false)
+          // 清空缓冲区
+          audioDataBuffer.current = []
+          isAudioComplete.current = false
+          setPlaybackStatus("stopped")
+          // 停止播放
+          if (soundRef.current) {
+            soundRef.current.stop()
+            soundRef.current.release()
+            soundRef.current = null
+          }
+          break
         case "error":
           setTtsStatus(`TTS Error: ${data?.message || "Unknown error"}`)
           setIsTtsProcessing(false)
