@@ -973,6 +973,57 @@ export type TtsEventCallback = (
 
 /**
  * 语音合成服务类
+ * 
+ * ===== 重构说明 (v2.0) =====
+ * 
+ * 重构目的：分离WebSocket连接逻辑与任务消息逻辑，允许复用同一个WebSocket连接来多次发送run-task/finish-task消息对
+ * 
+ * API 层次设计：
+ * ┌─────────────────────────────────────────────────┐
+ * │ WebSocket 连接层（连接管理）                      │
+ * │ connect() - 打开WebSocket连接                   │
+ * │ disconnect() - 关闭WebSocket连接                │
+ * │ isConnectionOpen() - 检查WebSocket连接状态       │
+ * └─────────────────────────────────────────────────┘
+ *                        ↓
+ * ┌─────────────────────────────────────────────────┐
+ * │ TTS 任务层（文本转语音任务）                      │
+ * │ start() - 启动TTS任务（发送run-task）            │
+ * │ stop() - 停止TTS任务（发送finish-task）          │
+ * │ sendText() - 发送待合成文本                      │
+ * │ isReady() - 检查任务是否就绪                     │
+ * └─────────────────────────────────────────────────┘
+ * 
+ * 核心改进：
+ * 1. connect()/disconnect() - WebSocket 连接管理
+ * 2. start()/stop() - TTS 任务管理
+ * 3. connect() 会自动创建连接，无需显式调用
+ * 4. 支持连接复用：多个 start()/stop() 对可复用同一连接
+ * 
+ * 典型使用流程 - 单次任务（简单场景，向后兼容）：
+ *   const tts = new AliTtsService(config);
+ *   await tts.connect();            // 打开WebSocket连接并启动任务
+ *   await tts.start();              // 启动TTS任务
+ *   tts.sendText(text, true);       // 发送文本
+ *   await tts.stop();               // 停止任务
+ *   tts.disconnect();               // 关闭连接
+ * 
+ * 典型使用流程 - 复用连接处理多个任务（高级场景）：
+ *   const tts = new AliTtsService(config);
+ *   await tts.connect();            // 打开WebSocket连接，保持打开
+ *   
+ *   // 第一个任务
+ *   await tts.start();              // 启动第一个TTS任务
+ *   tts.sendText(text1, true);      // 发送文本
+ *   await tts.stop();               // 停止第一个任务
+ *   
+ *   // 第二个任务 - 复用同一连接
+ *   await tts.start();              // 启动第二个TTS任务
+ *   tts.sendText(text2, true);      // 发送文本
+ *   await tts.stop();               // 停止第二个任务
+ *   
+ *   // 最后关闭连接
+ *   tts.disconnect();               // 关闭连接
  */
 export class AliTtsService {
   private config: TtsConfig;
@@ -980,11 +1031,12 @@ export class AliTtsService {
   private wsUrl: string;
   private socket: WebSocket | null = null;
   private taskId: string = this.generateUUID();
-  private isConnected: boolean = false;
-  private isTaskStarted: boolean = false;
+  private isConnected: boolean = false;          // WebSocket连接状态
+  private isTaskStarted: boolean = false;        // 当前任务是否已启动
   private isTaskFinished: boolean = false;
   private isAudioEndNotified: boolean = false; // 标志位，避免重复发送音频结束通知
   private messageQueue: any[] = [];
+  private resolveConnectionOpened: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskStarted: ((value: void | PromiseLike<void>) => void) | null = null;
   private resolveTaskFinished: ((value: void | PromiseLike<void>) => void) | null = null;
   
@@ -1026,58 +1078,35 @@ export class AliTtsService {
   }
   
   /**
-   * 连接到WebSocket服务并发送run-task消息
+   * 打开WebSocket连接（WebSocket 连接层）
+   * 仅处理连接逻辑，不发送任何任务消息
+   * 可以复用此连接来多次发送 run-task/finish-task 消息对
    * @returns Promise<void>
    */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.resolveTaskStarted = resolve;
-      
-      // 重置状态
-      this.isConnected = false;
-      this.isTaskStarted = false;
-      this.isTaskFinished = false;
-      this.isAudioEndNotified = false; // 重置音频结束通知标志位
-      this.messageQueue = [];
-      this.lastAudioReceivedTime = 0;
-      
-      // 清除旧的超时定时器
-      if (this.audioTimeoutTimer) {
-        clearTimeout(this.audioTimeoutTimer);
-        this.audioTimeoutTimer = null;
+      // 如果已经连接，直接resolve
+      if (this.isConnected && this.socket) {
+        console.log('[tts] WebSocket already connected');
+        resolve();
+        return;
       }
+
+      this.resolveConnectionOpened = resolve;
       
       try {
-        console.log('[tts] Connecting to WebSocket service...');
+        console.log('[tts] Opening WebSocket connection');
         this.socket = new WebSocket(this.wsUrl);
-        
         this.socket.binaryType = 'arraybuffer'; // 明确设置二进制类型
         
         this.socket.onopen = () => {
           console.log("[tts] WebSocket connection established.");
           this.isConnected = true;
           
-          // 生成随机任务ID
-          this.taskId = this.generateUUID();
-          
-          // 发送run-task消息
-          const runTaskMessage: WebSocketMessage = {
-            header: {
-              action: "run-task",
-              task_id: this.taskId,
-              streaming: "duplex"
-            },
-            payload: this.config
-          };
-          
-          try {
-            this.socket?.send(JSON.stringify(runTaskMessage));
-            console.log('[tts] Sent run-task message:', runTaskMessage);
-          } catch (error) {
-            console.error('[tts] Failed to send run-task message:', error);
-            this.handleError(new Error(`[tts] Failed to send run-task message: ${error}`));
-            reject(error);
+          if (this.resolveConnectionOpened) {
+            this.resolveConnectionOpened();
           }
+          resolve();
         };
         
         this.socket.onmessage = (event) => {
@@ -1090,7 +1119,7 @@ export class AliTtsService {
             try {
               const message = JSON.parse(event.data);
               // console.log("[tts] Received TTS message:", message);
-              this.handleTextMessage(message);
+              this._handleMessage(message);
             } catch (error) {
               console.error("[tts] Failed to parse TTS message:", error, "Raw message:", event.data);
               this.handleError(new Error(`[tts] Failed to parse message: ${error}`));
@@ -1103,33 +1132,86 @@ export class AliTtsService {
         this.socket.onerror = (error) => {
           const errorObj = error instanceof Error ? error : new Error(String(error));
           console.error("[tts] WebSocket error:", errorObj);
+          this.isConnected = false;
           this.handleError(errorObj);
           reject(errorObj);
         };
         
         this.socket.onclose = (event) => {
           console.log(`[tts] WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
-          
-          const wasConnected = this.isConnected;
           this.isConnected = false;
           this.isTaskStarted = false;
           this.isTaskFinished = true;
-          
-          // 只有在连接已建立但任务未开始时才reject
-          if (wasConnected && !this.isTaskStarted && this.resolveTaskStarted) {
-            reject(new Error(`[tts] WebSocket closed unexpectedly. Code: ${event.code}, Reason: ${event.reason}`));
-          }
-          
           // 通知音频结束
           this.notifyAudioEnd();
         };
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
         console.error("[tts] Failed to initialize TTS WebSocket:", errorObj);
+        this.isConnected = false;
         this.handleError(errorObj);
         reject(errorObj);
       }
     });
+  }
+
+  /**
+   * 启动TTS任务（TTS 任务层）
+   * 发送 run-task 消息以启动一个新的合成任务
+   * 如果WebSocket连接还没有建立，会自动调用 connect()
+   * @returns Promise<void>
+   */
+  start(): Promise<void> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // 如果连接还没有建立，先建立连接
+        if (!this.isConnected || !this.socket) {
+          console.log('[tts] WebSocket not connected, opening connection first');
+          await this.connect();
+        }
+
+        this.resolveTaskStarted = resolve;
+        
+        // 重置任务状态
+        this.isTaskStarted = false;
+        this.isTaskFinished = false;
+        this.isAudioEndNotified = false; // 重置音频结束通知标志位
+        this.lastAudioReceivedTime = 0;
+        
+        // 清除旧的超时定时器
+        if (this.audioTimeoutTimer) {
+          clearTimeout(this.audioTimeoutTimer);
+          this.audioTimeoutTimer = null;
+        }
+        
+        // 生成随机任务ID
+        this.taskId = this.generateUUID();
+        
+        // 发送run-task消息
+        const runTaskMessage: WebSocketMessage = {
+          header: {
+            action: "run-task",
+            task_id: this.taskId,
+            streaming: "duplex"
+          },
+          payload: this.config
+        };
+        
+        this.socket?.send(JSON.stringify(runTaskMessage));
+        console.log('[tts] Sent run-task message:', runTaskMessage);
+      } catch (error) {
+        console.error("[tts] Failed to send run-task message:", error);
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * 处理WebSocket消息
+   * @private
+   */
+  private _handleMessage(message: any): void {
+    this.handleTextMessage(message);
   }
   
   /**
@@ -1262,48 +1344,36 @@ export class AliTtsService {
   }
   
   /**
-   * 停止任务并等待task-finished消息
+   * 停止TTS任务（TTS 任务层）
+   * 仅停止当前任务，不关闭WebSocket连接
+   * 连接保持打开状态，可以再次调用 start() 来启动新的合成任务
    * @returns Promise<void>
    */
   stop(): Promise<void> {
-    // 检查状态
     if (!this.isConnected || !this.isTaskStarted || !this.socket || !this.taskId) {
       throw new Error("TTS WebSocket is not connected or task has not started.");
     }
 
     return new Promise((resolve, reject) => {
-      // 设置超时处理
-      // const timeoutId = setTimeout(() => {
-      //   console.error('[tts] Stop task timed out after 5 seconds');
-      //   reject(new Error('[tts] Stop task timed out'));
-        
-      //   // 超时后强制关闭连接
-      //   this.close();
-      // }, 10000);
-      
-      this.resolveTaskFinished = () => {
-        // clearTimeout(timeoutId);
-        resolve();
-      };
-      
-      // 发送finish-task指令
-      const finishTaskMessage: WebSocketMessage = {
-        header: {
-          action: "finish-task",
-          task_id: this.taskId,
-          streaming: "duplex"
-        },
-        payload: {
-          input: {}
-        }
-      };
+      this.resolveTaskFinished = resolve;
       
       try {
+        // 发送finish-task指令
+        const finishTaskMessage: WebSocketMessage = {
+          header: {
+            action: "finish-task",
+            task_id: this.taskId,
+            streaming: "duplex"
+          },
+          payload: {
+            input: {}
+          }
+        };
+        
         this.socket?.send(JSON.stringify(finishTaskMessage));
         console.log('[tts] Sent finish-task message:', finishTaskMessage);
       } catch (error) {
         const errorObj = error instanceof Error ? error : new Error(String(error));
-        // clearTimeout(timeoutId);
         console.error('[tts] Failed to send finish-task message:', errorObj);
         this.handleError(new Error(`[tts] Failed to send finish-task message: ${errorObj.message}`));
         reject(errorObj);
@@ -1312,20 +1382,15 @@ export class AliTtsService {
   }
   
   /**
-   * 关闭WebSocket连接
+   * 关闭WebSocket连接（WebSocket 连接层）
+   * 这将断开与服务器的连接，无法再发送任何消息
+   * 如果需要再次使用，需要重新调用 connect()
    */
-  close(): void {
-    console.log('[tts] Closing TTS WebSocket connection...');
+  disconnect(): void {
+    console.log('[tts] Closing WebSocket connection');
     
     // 停止超时检测
     this.stopAudioTimeout();
-    
-    // 清理回调函数引用，避免内存泄漏
-    this.audioCallback = null;
-    this.errorCallback = null;
-    this.eventCallback = null;
-    this.resolveTaskStarted = null;
-    this.resolveTaskFinished = null;
     
     // 关闭WebSocket连接
     if (this.socket) {
@@ -1341,6 +1406,21 @@ export class AliTtsService {
     this.isConnected = false;
     this.isTaskStarted = false;
     this.isTaskFinished = true;
+  }
+
+  /**
+   * 关闭WebSocket连接（已废弃，请使用 disconnect()）
+   * @deprecated 使用 disconnect() 替代
+   */
+  close(): void {
+    this.disconnect();
+    
+    // 清理回调函数引用，避免内存泄漏
+    this.audioCallback = null;
+    this.errorCallback = null;
+    this.eventCallback = null;
+    this.resolveTaskStarted = null;
+    this.resolveTaskFinished = null;
     this.messageQueue = [];
     this.lastAudioReceivedTime = 0;
   }
@@ -1449,8 +1529,16 @@ export class AliTtsService {
   }
   
   /**
-   * 获取连接状态
+   * 检查WebSocket连接是否已打开（WebSocket 连接层）
    * @returns 是否已连接
+   */
+  isConnectionOpen(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * 检查当前任务是否已启动并准备好发送文本（TTS 任务层）
+   * @returns 是否任务已启动
    */
   isReady(): boolean {
     return this.isConnected && this.isTaskStarted;

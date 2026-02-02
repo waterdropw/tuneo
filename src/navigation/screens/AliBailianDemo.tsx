@@ -266,11 +266,11 @@ export const AliBailianDemo = () => {
     asrServiceRef.current = asrService
     
     // Update TTS service configuration instead of creating a new instance
-    let ttsService = ttsServiceRef.current;
-    if (ttsService) {
+    const oldTtsService = ttsServiceRef.current;
+    if (oldTtsService) {
       // 关闭旧的TTS服务连接
       try {
-        ttsService.close();
+        oldTtsService.close();
       } catch (error) {
         console.error("Error closing old TTS service:", error);
       }
@@ -285,7 +285,7 @@ export const AliBailianDemo = () => {
       const selectedLanguage = LanguageOptions[targetLanguage as keyof typeof LanguageOptions];
       ttsConfig.parameters.instruction = `你会用${selectedLanguage || "该语言"}说出来。` 
     }
-    ttsService = new AliTtsService(ttsConfig)
+    const ttsService = new AliTtsService(ttsConfig)
     ttsServiceRef.current = ttsService
     
     // Create audio processor instance
@@ -467,9 +467,13 @@ export const AliBailianDemo = () => {
       setTtsStatus("Connecting to TTS service...");
       
       try {
-        // Connect to TTS service
+        // Connect to TTS service (open WebSocket connection)
         await ttsService.connect();
         console.log("[Auto TTS] TTS service connected successfully");
+        
+        // Start TTS task (send run-task message)
+        await ttsService.start();
+        console.log("[Auto TTS] TTS task started successfully");
         
         // Send resultPairs[1] text for synthesis, if empty send resultPairs[0]
         const textToSynthesize = resultPairs[1].value.trim();
@@ -595,9 +599,13 @@ export const AliBailianDemo = () => {
     setTtsStatus("Connecting to TTS service...")
     
     try {
-      // Connect to TTS service
+      // Connect to TTS service (open WebSocket connection)
       await ttsService.connect()
       console.log("[Manual TTS] TTS service connected successfully")
+      
+      // Start TTS task (send run-task message)
+      await ttsService.start()
+      console.log("[Manual TTS] TTS task started successfully")
       
       // Send text for synthesis
       ttsService.sendText(ttsText, true)
@@ -630,8 +638,15 @@ export const AliBailianDemo = () => {
         soundRef.current = null
       }
       
-      // Then stop TTS service
-      await ttsService.stop()
+      // Then stop TTS task if it's running
+      if (ttsService.isReady()) {
+        await ttsService.stop()
+        console.log("[TTS Stop] TTS task stopped")
+      }
+      
+      // Finally close the WebSocket connection
+      ttsService.disconnect()
+      console.log("[TTS Stop] TTS connection closed")
       
       // Clear audio buffer
       console.log(`[TTS Stop] Clearing audio buffer (had ${audioDataBuffer.current.length} chunks)`)
