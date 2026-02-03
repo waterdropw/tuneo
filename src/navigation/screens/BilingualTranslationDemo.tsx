@@ -97,6 +97,9 @@ export const BilingualTranslationDemo = () => {
   // Language pair selection
   const [selectedLanguagePair, setSelectedLanguagePair] = useState<LanguagePairKey>("zh-en")
 
+  // Performance optimization: server-side audio cache
+  const [useServerCache, setUseServerCache] = useState(false)
+
   // Results display
   const [sourceText, setSourceText] = useState("")
   const [translatedText, setTranslatedText] = useState("")
@@ -167,6 +170,13 @@ export const BilingualTranslationDemo = () => {
     // Create bilingual ASR service
     const asrConfig = new GummyConfig()
     const bilingualAsrService = new AutoDetectBilingualAsrService(asrConfig, langConfig)
+    
+    // Enable server-side audio cache optimization if requested
+    if (useServerCache) {
+      console.log("[BilingualTranslationDemo] Enabling server-side audio cache optimization")
+      bilingualAsrService.setUseServerSideAudioCache(true)
+    }
+    
     bilingualAsrServiceRef.current = bilingualAsrService
 
     // Close old TTS service if exists
@@ -286,7 +296,7 @@ export const BilingualTranslationDemo = () => {
       setPlaybackStatus("stopped")
       setIsTtsProcessing(false)
     }
-  }, [micAccess, selectedLanguagePair])
+  }, [micAccess, selectedLanguagePair, useServerCache])
 
   // Play audio buffer
   const playAudioBuffer = useCallback(async () => {
@@ -541,6 +551,23 @@ export const BilingualTranslationDemo = () => {
         </Picker>
       </View>
 
+      {/* Performance Optimization Settings */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Performance Settings</Text>
+        <TouchableOpacity
+          style={[styles.optionButton, useServerCache && styles.optionButtonActive]}
+          onPress={() => setUseServerCache(!useServerCache)}
+          disabled={isProcessing}
+        >
+          <Text style={[styles.optionButtonText, useServerCache && styles.optionButtonTextActive]}>
+            {useServerCache ? "✓ Server-side Cache Enabled" : "○ Server-side Cache Disabled"}
+          </Text>
+          <Text style={[styles.optionButtonSubtext, useServerCache && styles.optionButtonSubtextActive]}>
+            Skip re-transmission of audio in translation phase
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Control Buttons */}
       <View style={styles.section}>
         <View style={styles.controls}>
@@ -698,6 +725,34 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: "bold",
     fontSize: 14,
+  },
+  optionButton: {
+    backgroundColor: Colors.bgInactive,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.secondary,
+    alignItems: "flex-start",
+  },
+  optionButtonActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + "15", // Primary with transparency
+  },
+  optionButtonText: {
+    color: Colors.secondary,
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  optionButtonTextActive: {
+    color: Colors.primary,
+  },
+  optionButtonSubtext: {
+    color: Colors.secondary,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  optionButtonSubtextActive: {
+    color: Colors.primary,
   },
   statusContainer: {
     flexDirection: "row",

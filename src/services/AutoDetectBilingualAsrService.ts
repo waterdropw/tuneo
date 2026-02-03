@@ -11,7 +11,9 @@
  * 3. 收到 result-generated 后，根据 transcription.text 判断源语言
  * 4. 立即再发一条 run-task（复用同一连接，换一个新的 task_id），把 translation_enabled 设为 true，
  *    并根据第 3 步结果把 translation_target_languages 设为正确的目标语言
- * 5. 把同一段音频重新发一次（或把之前缓存的音频直接重发），即可得到翻译结果
+ * 5. 根据阿里云 API 的实际行为，可能存在两种情况：
+ *    - 情况A（当前实现）：把同一段音频重新发一次给翻译任务
+ *    - 情况B（需验证）：服务端可能缓存了第一个任务的音频，第二个任务可直接利用，无需重新发送
  * 
  * 典型使用流程：
  *   // 中英互译
@@ -82,6 +84,11 @@ export class AutoDetectBilingualAsrService extends AliAsrService {
   
   // 实时模式下的音频缓冲
   private detectionAudioFrames: Int16Array[] = [];  // 检测阶段的所有音频帧
+  
+  // 性能优化开关：是否依赖服务端缓存（跳过重新发送音频）
+  // 默认 false：为了保证兼容性和完整性，总是重新发送音频
+  // 如果设置为 true：假设服务端在同一连接内缓存音频，可以跳过重新发送来降低延迟和带宽
+  private useServerSideAudioCache: boolean = false;
   
   // 语言配置
   private languageConfig: BilingualLanguageConfig;
@@ -407,14 +414,20 @@ export class AutoDetectBilingualAsrService extends AliAsrService {
         this.phaseSwitchingCallback(false);
       }
 
-      // 如果有缓存的音频数据，立即发送给翻译任务
-      if (cachedDetectionAudio && cachedDetectionAudio.length > 0) {
-        console.log("[auto-detect-bilingual-asr] Sending cached detection audio to translation task:", cachedDetectionAudio.length, "samples");
-        try {
-          this.sendAudio(cachedDetectionAudio);
-          console.log("[auto-detect-bilingual-asr] Cached detection audio sent successfully");
-        } catch (error) {
-          console.error("[auto-detect-bilingual-asr] Failed to send cached detection audio:", error);
+      // 如果启用了服务端缓存优化，则跳过重新发送音频
+      // 此时假设阿里云服务端会在同一连接内自动利用检测阶段的音频
+      if (this.useServerSideAudioCache) {
+        console.log("[auto-detect-bilingual-asr] Server-side audio cache enabled - skipping re-transmission of detection phase audio");
+      } else {
+        // 默认行为：重新发送缓存的音频给翻译任务（确保兼容性）
+        if (cachedDetectionAudio && cachedDetectionAudio.length > 0) {
+          console.log("[auto-detect-bilingual-asr] Sending cached detection audio to translation task:", cachedDetectionAudio.length, "samples");
+          try {
+            this.sendAudio(cachedDetectionAudio);
+            console.log("[auto-detect-bilingual-asr] Cached detection audio sent successfully");
+          } catch (error) {
+            console.error("[auto-detect-bilingual-asr] Failed to send cached detection audio:", error);
+          }
         }
       }
     } catch (error) {
@@ -605,18 +618,24 @@ export class AutoDetectBilingualAsrService extends AliAsrService {
         };
 
         this.resolveTaskStarted = () => {
-          // 任务启动后立即发送音频
-          console.log(
-            "[auto-detect-bilingual-asr] Translation task started, sending audio"
-          );
-          try {
-            this.sendAudio(audioToSend!);
-          } catch (error) {
-            console.error(
-              "[auto-detect-bilingual-asr] Failed to send audio:",
-              error
+          // 任务启动后根据配置决定是否发送音频
+          if (this.useServerSideAudioCache) {
+            console.log(
+              "[auto-detect-bilingual-asr] Translation task started (server-side cache enabled - skipping audio send)"
             );
-            reject(error);
+          } else {
+            console.log(
+              "[auto-detect-bilingual-asr] Translation task started, sending audio"
+            );
+            try {
+              this.sendAudio(audioToSend!);
+            } catch (error) {
+              console.error(
+                "[auto-detect-bilingual-asr] Failed to send audio:",
+                error
+              );
+              reject(error);
+            }
           }
         };
 
@@ -724,6 +743,25 @@ export class AutoDetectBilingualAsrService extends AliAsrService {
     callback: (isSwitching: boolean) => void
   ): void {
     this.phaseSwitchingCallback = callback;
+  }
+
+  /**
+   * 设置是否使用服务端音频缓存进行性能优化
+   * @param useCache 是否使用服务端缓存来跳过重新发送音频
+   * @default false - 为了保证兼容性，默认总是重新发送音频
+   * @note 设置为 true 时，假设阿里云服务端会在同一 WebSocket 连接内缓存第一个任务的音频数据
+   *       这可以降低延迟和带宽占用，但需要确认服务端确实支持此功能
+   */
+  public setUseServerSideAudioCache(useCache: boolean): void {
+    this.useServerSideAudioCache = useCache;
+    console.log("[auto-detect-bilingual-asr] Server-side audio cache optimization:", useCache ? "enabled" : "disabled");
+  }
+
+  /**
+   * 获取是否使用服务端音频缓存
+   */
+  public isUsingServerSideAudioCache(): boolean {
+    return this.useServerSideAudioCache;
   }
 
   /**

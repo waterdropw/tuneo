@@ -11,7 +11,7 @@ import { CloseButton } from "@/components/CloseButton"
 import { Platform } from "react-native"
 
 const RootStack = createNativeStackNavigator({
-  initialRouteName: "asr",
+  initialRouteName: "bilingual",
   screens: {
     Tuneo: {
       screen: Tuneo,
@@ -35,7 +35,7 @@ const RootStack = createNativeStackNavigator({
         headerShadowVisible: false,
       },
     },
-    asr: {
+    demo: {
       screen: AliBailianDemo,
       options: {
         title: "Ali ASR & TTS Demo",
