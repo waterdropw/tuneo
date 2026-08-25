@@ -74,7 +74,7 @@ export class OmniRealtimeService {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (this.connected && this.socket) {
+      if (this.connected && this.socket && this.ready) {
         resolve()
         return
       }
@@ -112,7 +112,14 @@ export class OmniRealtimeService {
           console.log(`[omni-realtime] WebSocket closed: ${event.code} ${event.reason}`)
           this.connected = false
           this.ready = false
-          this.eventCallback?.("error", { message: `Connection closed (${event.code})` })
+          if (event.code !== 1000) {
+            this.eventCallback?.("error", { message: `Connection closed (${event.code})` })
+          }
+          if (this.rejectConnection) {
+            this.rejectConnection(new Error(`[omni-realtime] Connection closed (${event.code})`))
+            this.rejectConnection = null
+          }
+          this.resolveSessionUpdated = null
         }
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error))
@@ -123,6 +130,12 @@ export class OmniRealtimeService {
   }
 
   disconnect(): void {
+    if (this.rejectConnection) {
+      this.rejectConnection(new Error("[omni-realtime] Disconnected before session was established."))
+      this.rejectConnection = null
+    }
+    this.resolveSessionUpdated = null
+
     if (this.socket) {
       try {
         this.socket.close(1000, "Normal closure")
@@ -133,8 +146,6 @@ export class OmniRealtimeService {
     }
     this.connected = false
     this.ready = false
-    this.resolveSessionUpdated = null
-    this.rejectConnection = null
   }
 
   isConnectionOpen(): boolean {
