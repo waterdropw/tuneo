@@ -44,6 +44,7 @@ export const Companion = () => {
   const playerRef = useRef<OmniAudioPlayer | null>(null)
   const audioSourceRef = useRef<AudioSource | null>(null)
   const statusRef = useRef<SessionStatus>("idle")
+  const stoppingRef = useRef(false)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -55,6 +56,16 @@ export const Companion = () => {
       else setMicAccess("denied")
     })()
   }, [])
+
+  const teardown = () => {
+    audioSourceRef.current?.stopProcessing()
+    audioSourceRef.current = null
+    playerRef.current?.stop()
+    playerRef.current?.reset()
+    playerRef.current = null
+    serviceRef.current?.disconnect()
+    serviceRef.current = null
+  }
 
   const handleEvent = (event: OmniEvent, data?: any) => {
     switch (event) {
@@ -90,6 +101,7 @@ export const Companion = () => {
         statusRef.current = "listening"
         break
       case "error":
+        teardown()
         setErrorMsg(typeof data?.message === "string" ? data.message : "连接出错")
         setStatus("idle")
         statusRef.current = "idle"
@@ -100,6 +112,7 @@ export const Companion = () => {
   }
 
   const handleStart = async () => {
+    stoppingRef.current = false
     setErrorMsg("")
     setAssistantText("")
     setUserText("")
@@ -126,6 +139,7 @@ export const Companion = () => {
       statusRef.current = "responding"
     })
     service.setErrorCallback((err) => {
+      teardown()
       setErrorMsg(err.message)
       setStatus("idle")
       statusRef.current = "idle"
@@ -146,6 +160,10 @@ export const Companion = () => {
         }
       })
     } catch (e) {
+      if (stoppingRef.current) {
+        return
+      }
+      teardown()
       setErrorMsg(e instanceof Error ? e.message : String(e))
       setStatus("idle")
       statusRef.current = "idle"
@@ -153,11 +171,8 @@ export const Companion = () => {
   }
 
   const handleStop = () => {
-    audioSourceRef.current?.stopProcessing()
-    playerRef.current?.stop()
-    playerRef.current?.reset()
-    serviceRef.current?.disconnect()
-    serviceRef.current = null
+    stoppingRef.current = true
+    teardown()
     setStatus("idle")
     statusRef.current = "idle"
     setAssistantText("")
