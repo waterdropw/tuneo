@@ -46,23 +46,37 @@ export class OmniAudioPlayer {
     const wav = pcm16ToWav(pcm, OUTPUT_SAMPLE_RATE)
     const path = `${FileSystem.cacheDirectory}companion_${Date.now()}.wav`
 
-    await FileSystem.writeAsStringAsync(path, bytesToBase64(wav), {
-      encoding: FileSystem.EncodingType.Base64,
-    })
+    try {
+      await FileSystem.writeAsStringAsync(path, bytesToBase64(wav), {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+    } catch (e) {
+      console.error("[omni-audio] Failed to write audio file:", e)
+      return
+    }
 
     this.stop()
 
-    this.sound = new Sound(path, undefined, (error) => {
+    const sound = new Sound(path, undefined, (error) => {
       if (error) {
         console.error("[omni-audio] Failed to load audio:", error)
-        this.cleanup(path)
+        sound.release()
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {})
+        if (this.sound === sound) {
+          this.sound = null
+        }
         return
       }
-      this.sound?.play((success) => {
+      sound.play((success) => {
         console.log(`[omni-audio] Playback finished: ${success}`)
-        this.cleanup(path)
+        sound.release()
+        FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {})
+        if (this.sound === sound) {
+          this.sound = null
+        }
       })
     })
+    this.sound = sound
   }
 
   stop(): void {
@@ -71,11 +85,5 @@ export class OmniAudioPlayer {
       this.sound.release()
       this.sound = null
     }
-  }
-
-  private cleanup(path: string): void {
-    this.sound?.release()
-    this.sound = null
-    FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {})
   }
 }
