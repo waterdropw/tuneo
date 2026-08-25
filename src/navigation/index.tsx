@@ -5,6 +5,7 @@ import { Settings } from "./screens/Settings"
 import { Tuneo } from "./screens/Tuneo"
 import { Avatar } from "./screens/Avatar"
 import { AliBailianDemo } from "./screens/AliBailianDemo"
+import { Companion } from "./screens/Companion"
 import { BilingualTranslationDemo } from "./screens/BilingualTranslationDemo"
 import Colors from "@/colors"
 import { CloseButton } from "@/components/CloseButton"
@@ -39,6 +40,16 @@ const RootStack = createNativeStackNavigator({
       screen: AliBailianDemo,
       options: {
         title: "Ali ASR & TTS Demo",
+        headerTitleStyle: { color: Colors.primary },
+        headerStyle: { backgroundColor: Colors.bgTitle },
+        headerTintColor: Colors.primary,
+        headerShadowVisible: false,
+      },
+    },
+    Companion: {
+      screen: Companion,
+      options: {
+        title: "儿童陪伴",
         headerTitleStyle: { color: Colors.primary },
         headerStyle: { backgroundColor: Colors.bgTitle },
         headerTintColor: Colors.primary,
