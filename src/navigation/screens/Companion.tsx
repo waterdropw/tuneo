@@ -74,12 +74,11 @@ export const Companion = () => {
         statusRef.current = "listening"
         break
       case "speech-started":
-        if (statusRef.current === "responding") {
-          serviceRef.current?.cancelResponse()
-          playerRef.current?.stop()
-          playerRef.current?.reset()
-        }
+        serviceRef.current?.cancelResponse()
+        playerRef.current?.stop()
+        playerRef.current?.reset()
         setAssistantText("")
+        setUserText("")
         setStatus("listening")
         statusRef.current = "listening"
         break
