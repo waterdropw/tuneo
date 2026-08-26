@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native"
 import { AudioModule } from "expo-audio"
+import * as FileSystem from "expo-file-system"
 import Colors from "@/colors"
 import RequireMicAccess from "@/components/RequireMicAccess"
 import { Picker } from "@/components/Picker"
@@ -42,8 +43,34 @@ const VIDEO_MODE_TITLES: Record<VideoMode, string> = {
   continuous: "持续推送",
 }
 
-type ChatMessage = { role: "user" | "assistant"; text: string }
+type ChatMessage = { role: "user" | "assistant"; text: string; ts: number }
 const HISTORY_KEY = "companion-chat-history"
+
+function dayKey(ts: number): string {
+  const d = new Date(ts || Date.now())
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
+}
+
+async function saveDailyHistory(messages: ChatMessage[]): Promise<void> {
+  try {
+    const byDay = new Map<string, ChatMessage[]>()
+    for (const m of messages) {
+      const k = dayKey(m.ts)
+      const list = byDay.get(k) ?? []
+      list.push(m)
+      byDay.set(k, list)
+    }
+    for (const [day, list] of byDay) {
+      const path = `${FileSystem.documentDirectory}chat-${day}.json`
+      await FileSystem.writeAsStringAsync(path, JSON.stringify(list, null, 2))
+    }
+  } catch (e) {
+    console.warn("[companion] failed to save daily history", e)
+  }
+}
 
 export const Companion = () => {
   const [micAccess, setMicAccess] = useState<MicrophoneAccess>("pending")
@@ -103,6 +130,7 @@ export const Companion = () => {
     } catch (e) {
       console.warn("[companion] failed to save chat history", e)
     }
+    saveDailyHistory(messages)
   }, [messages])
 
   const clearHistory = () => {
@@ -137,7 +165,7 @@ export const Companion = () => {
       case "user-transcript": {
         const text = (data ?? "").trim()
         if (text) {
-          setMessages((prev) => [...prev, { role: "user", text }])
+          setMessages((prev) => [...prev, { role: "user", text, ts: Date.now() }])
         }
         break
       }
@@ -190,9 +218,9 @@ export const Companion = () => {
       setMessages((prev) => {
         const last = prev[prev.length - 1]
         if (last && last.role === "assistant") {
-          return [...prev.slice(0, -1), { role: "assistant", text: last.text + text }]
+          return [...prev.slice(0, -1), { ...last, text: last.text + text }]
         }
-        return [...prev, { role: "assistant", text }]
+        return [...prev, { role: "assistant", text, ts: Date.now() }]
       })
       setStatus("responding")
       statusRef.current = "responding"
