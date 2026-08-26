@@ -40,7 +40,7 @@ export type OmniEvent =
   | "error"
 
 export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
-  model: "qwen3.5-omni-flash-realtime",
+  model: "qwen3.5-omni-plus-realtime",
   voice: "Tina",
   instructions: "",
   inputAudioFormat: "pcm",
