@@ -6,16 +6,13 @@
 import type { RefObject } from "react"
 import { CameraView } from "expo-camera"
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator"
+import * as FileSystem from "expo-file-system"
 
 export const MAX_FRAME_BYTES = 256 * 1024
 
-// 由 base64 长度估算原始字节数（base64 每 4 字符约编码 3 字节）
-export function estimateJpegBytes(base64: string): number {
-  return Math.floor((base64.length * 3) / 4)
-}
-
+// 协议限制的是 base64 编码后的长度（≤256KB），直接比较字符串长度
 export function fitsSizeLimit(base64: string, maxBytes: number = MAX_FRAME_BYTES): boolean {
-  return estimateJpegBytes(base64) <= maxBytes
+  return base64.length <= maxBytes
 }
 
 const CONTINUOUS_INTERVAL_MS = 1000
@@ -58,15 +55,20 @@ export class VideoFrameSource {
       return
     }
     this.busy = true
+    const uris: string[] = []
     try {
       const photo = await this.cameraRef.current.takePictureAsync({ base64: false })
-      if (!photo) return
+      if (!photo) {
+        return
+      }
+      uris.push(photo.uri)
 
       let result = await manipulateAsync(
         photo.uri,
         [{ resize: { width: TARGET_WIDTH } }],
         { compress: 0.7, format: SaveFormat.JPEG, base64: true }
       )
+      uris.push(result.uri)
 
       if (!result.base64 || !fitsSizeLimit(result.base64)) {
         result = await manipulateAsync(
@@ -74,6 +76,7 @@ export class VideoFrameSource {
           [{ resize: { width: FALLBACK_WIDTH } }],
           { compress: 0.5, format: SaveFormat.JPEG, base64: true }
         )
+        uris.push(result.uri)
       }
 
       if (result.base64 && fitsSizeLimit(result.base64)) {
@@ -84,6 +87,9 @@ export class VideoFrameSource {
     } catch (e) {
       console.warn("[video-frame] capture failed", e)
     } finally {
+      for (const uri of uris) {
+        FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {})
+      }
       this.busy = false
     }
   }

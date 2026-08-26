@@ -56,6 +56,7 @@ export const Companion = () => {
   const audioSourceRef = useRef<AudioSource | null>(null)
   const statusRef = useRef<SessionStatus>("idle")
   const stoppingRef = useRef(false)
+  const cameraRequestedRef = useRef(false)
   const cameraRef = useRef<CameraView>(null)
   const videoSourceRef = useRef<VideoFrameSource | null>(null)
 
@@ -76,8 +77,10 @@ export const Companion = () => {
       videoMode !== "off" &&
       cameraPermission &&
       !cameraPermission.granted &&
-      cameraPermission.canAskAgain
+      cameraPermission.canAskAgain &&
+      !cameraRequestedRef.current
     ) {
+      cameraRequestedRef.current = true
       requestCameraPermission()
     }
   }, [videoMode, cameraPermission, requestCameraPermission])
