@@ -53,6 +53,12 @@
             "kotlinVersion": "1.9.25"
           }
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允许使用摄像头来识别孩子指向的物体。"
+        }
       ]
     ],
     "extra": {
