@@ -72,6 +72,18 @@ async function saveDailyHistory(messages: ChatMessage[]): Promise<void> {
   }
 }
 
+const SAVE_BATCH = 100
+const DISPLAY_BATCH = 100
+
+function persistMessages(list: ChatMessage[]): void {
+  try {
+    localStorage.set(HISTORY_KEY, JSON.stringify(list))
+  } catch (e) {
+    console.warn("[companion] failed to save chat history", e)
+  }
+  saveDailyHistory(list)
+}
+
 export const Companion = () => {
   const [micAccess, setMicAccess] = useState<MicrophoneAccess>("pending")
   const [status, setStatus] = useState<SessionStatus>("idle")
@@ -85,6 +97,7 @@ export const Companion = () => {
     return []
   })
   const [errorMsg, setErrorMsg] = useState("")
+  const [visibleCount, setVisibleCount] = useState(DISPLAY_BATCH)
 
   const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
@@ -98,6 +111,9 @@ export const Companion = () => {
   const cameraRef = useRef<CameraView>(null)
   const videoSourceRef = useRef<VideoFrameSource | null>(null)
   const chatScrollRef = useRef<ScrollView>(null)
+  const messagesRef = useRef<ChatMessage[]>([])
+  const lastSavedLenRef = useRef(0)
+  const prevLenRef = useRef(0)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -125,16 +141,24 @@ export const Companion = () => {
   }, [videoMode, cameraPermission, requestCameraPermission])
 
   useEffect(() => {
-    try {
-      localStorage.set(HISTORY_KEY, JSON.stringify(messages))
-    } catch (e) {
-      console.warn("[companion] failed to save chat history", e)
+    messagesRef.current = messages
+    if (messages.length > prevLenRef.current) {
+      prevLenRef.current = messages.length
+      chatScrollRef.current?.scrollToEnd({ animated: true })
     }
-    saveDailyHistory(messages)
+    if (messages.length - lastSavedLenRef.current >= SAVE_BATCH) {
+      lastSavedLenRef.current = messages.length
+      persistMessages(messages)
+    }
   }, [messages])
 
   const clearHistory = () => {
     setMessages([])
+    setVisibleCount(DISPLAY_BATCH)
+    messagesRef.current = []
+    lastSavedLenRef.current = 0
+    prevLenRef.current = 0
+    persistMessages([])
   }
 
   const teardown = () => {
@@ -276,6 +300,8 @@ export const Companion = () => {
   const handleStop = () => {
     stoppingRef.current = true
     teardown()
+    persistMessages(messagesRef.current)
+    lastSavedLenRef.current = messagesRef.current.length
     setStatus("idle")
     statusRef.current = "idle"
   }
@@ -286,6 +312,7 @@ export const Companion = () => {
       playerRef.current?.stop()
       videoSourceRef.current?.stop()
       serviceRef.current?.disconnect()
+      persistMessages(messagesRef.current)
     }
   }, [])
 
@@ -398,29 +425,38 @@ export const Companion = () => {
         <ScrollView
           ref={chatScrollRef}
           style={styles.chatBox}
-          onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScroll={({ nativeEvent }) => {
+            if (nativeEvent.contentOffset.y <= 10 && visibleCount < messages.length) {
+              setVisibleCount((c) => c + DISPLAY_BATCH)
+            }
+          }}
+          scrollEventThrottle={100}
         >
           {messages.length === 0 ? (
             <Text style={styles.chatEmpty}>开始对话吧…</Text>
           ) : (
-            messages.map((m, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.chatBubble,
-                  m.role === "user" ? styles.userBubble : styles.assistantBubble,
-                ]}
-              >
-                <Text
+            messages.slice(Math.max(0, messages.length - visibleCount)).map((m, i) => {
+              const idx = Math.max(0, messages.length - visibleCount) + i
+              return (
+                <View
+                  key={idx}
                   style={[
-                    styles.chatText,
-                    m.role === "user" ? styles.userChatText : styles.assistantChatText,
+                    styles.chatBubble,
+                    m.role === "user" ? styles.userBubble : styles.assistantBubble,
                   ]}
                 >
-                  {m.text}
-                </Text>
-              </View>
-            ))
+                  <Text
+                    style={[
+                      styles.chatText,
+                      m.role === "user" ? styles.userChatText : styles.assistantChatText,
+                    ]}
+                  >
+                    {m.text}
+                  </Text>
+                </View>
+              )
+            })
           )}
         </ScrollView>
       </View>
