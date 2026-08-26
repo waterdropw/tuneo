@@ -45,11 +45,7 @@ export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
   instructions: "",
   inputAudioFormat: "pcm",
   outputAudioFormat: "pcm",
-  turnDetection: {
-    type: "server_vad",
-    threshold: 0.5,
-    silenceDurationMs: 800,
-  },
+  turnDetection: null,
   inputAudioTranscription: { model: "qwen3-asr-flash-realtime" },
 }
 
@@ -207,6 +203,16 @@ export class OmniRealtimeService {
   // 打断进行中的回复（孩子抢话时使用）
   cancelResponse(): void {
     this.send({ type: "response.cancel" })
+  }
+
+  // 提交输入音频缓冲，通知服务端「这轮人声已结束，请处理」（端侧 VAD 接管轮次时使用）
+  commitAudioBuffer(): void {
+    this.send({ type: "input_audio_buffer.commit" })
+  }
+
+  // 请求服务端生成回复（配合 commit 使用；服务端 VAD 关闭后需显式触发）
+  createResponse(): void {
+    this.send({ type: "response.create" })
   }
 
   setEventCallback(cb: (event: OmniEvent, data?: any) => void): void {

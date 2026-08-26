@@ -31,7 +31,7 @@ const config: OmniRealtimeConfig = {
   instructions: "you are a friendly companion",
   inputAudioFormat: "pcm",
   outputAudioFormat: "pcm",
-  turnDetection: { type: "server_vad", threshold: 0.5, silenceDurationMs: 800 },
+  turnDetection: null,
   inputAudioTranscription: { model: "qwen3-asr-flash-realtime" },
 }
 
@@ -45,8 +45,7 @@ assert(sock.sent.length === 1, "one message sent")
 const update = JSON.parse(sock.sent[0])
 assert(update.type === "session.update", "session.update type")
 assert(update.session.voice === "Cherry", "voice")
-assert(update.session.turn_detection.type === "server_vad", "vad type")
-assert(update.session.turn_detection.silence_duration_ms === 800, "silence duration")
+assert(update.session.turn_detection === null, "turn_detection disabled (端侧 VAD 接管)")
 assert(update.session.input_audio_transcription.model === "qwen3-asr-flash-realtime", "transcription model")
 
 // 验证 appendAudio 编码
@@ -62,5 +61,13 @@ service.appendImage("aGVsbG8=")
 const img = JSON.parse(sock.sent[sock.sent.length - 1])
 assert(img.type === "input_image_buffer.append", "appendImage type")
 assert(img.image === "aGVsbG8=", "appendImage image field")
+
+// commitAudioBuffer / createResponse 消息构造
+;(service as any).send = (m: any) => sock.sent.push(JSON.stringify(m))
+service.commitAudioBuffer()
+assert(JSON.parse(sock.sent[sock.sent.length - 1]).type === "input_audio_buffer.commit", "commit type")
+
+service.createResponse()
+assert(JSON.parse(sock.sent[sock.sent.length - 1]).type === "response.create", "createResponse type")
 
 console.log("OmniRealtimeService example assertions passed")
