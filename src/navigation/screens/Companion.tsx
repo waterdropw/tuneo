@@ -25,6 +25,7 @@ import {
   VideoMode,
 } from "@/stores/companionStore"
 import { MenuAction } from "@react-native-menu/menu"
+import { localStorage } from "@/stores/localStorage"
 
 type MicrophoneAccess = "pending" | "granted" | "denied"
 type SessionStatus = "idle" | "connecting" | "listening" | "responding"
@@ -41,11 +42,21 @@ const VIDEO_MODE_TITLES: Record<VideoMode, string> = {
   continuous: "持续推送",
 }
 
+type ChatMessage = { role: "user" | "assistant"; text: string }
+const HISTORY_KEY = "companion-chat-history"
+
 export const Companion = () => {
   const [micAccess, setMicAccess] = useState<MicrophoneAccess>("pending")
   const [status, setStatus] = useState<SessionStatus>("idle")
-  const [assistantText, setAssistantText] = useState("")
-  const [userText, setUserText] = useState("")
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const raw = localStorage.getString(HISTORY_KEY)
+      if (raw) return JSON.parse(raw) as ChatMessage[]
+    } catch (e) {
+      console.warn("[companion] failed to load chat history", e)
+    }
+    return []
+  })
   const [errorMsg, setErrorMsg] = useState("")
 
   const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
@@ -59,6 +70,7 @@ export const Companion = () => {
   const cameraRequestedRef = useRef(false)
   const cameraRef = useRef<CameraView>(null)
   const videoSourceRef = useRef<VideoFrameSource | null>(null)
+  const chatScrollRef = useRef<ScrollView>(null)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -85,6 +97,18 @@ export const Companion = () => {
     }
   }, [videoMode, cameraPermission, requestCameraPermission])
 
+  useEffect(() => {
+    try {
+      localStorage.set(HISTORY_KEY, JSON.stringify(messages))
+    } catch (e) {
+      console.warn("[companion] failed to save chat history", e)
+    }
+  }, [messages])
+
+  const clearHistory = () => {
+    setMessages([])
+  }
+
   const teardown = () => {
     audioSourceRef.current?.stopProcessing()
     audioSourceRef.current = null
@@ -107,14 +131,16 @@ export const Companion = () => {
         serviceRef.current?.cancelResponse()
         playerRef.current?.stop()
         playerRef.current?.reset()
-        setAssistantText("")
-        setUserText("")
         setStatus("listening")
         statusRef.current = "listening"
         break
-      case "user-transcript":
-        setUserText(data ?? "")
+      case "user-transcript": {
+        const text = (data ?? "").trim()
+        if (text) {
+          setMessages((prev) => [...prev, { role: "user", text }])
+        }
         break
+      }
       case "audio-delta":
       case "assistant-transcript-delta":
         setStatus("responding")
@@ -143,8 +169,6 @@ export const Companion = () => {
   const handleStart = async () => {
     stoppingRef.current = false
     setErrorMsg("")
-    setAssistantText("")
-    setUserText("")
     setStatus("connecting")
     statusRef.current = "connecting"
 
@@ -163,7 +187,13 @@ export const Companion = () => {
     service.setEventCallback(handleEvent)
     service.setAudioDeltaCallback((b64) => player.appendPcmBase64(b64))
     service.setTranscriptCallback((text) => {
-      setAssistantText((prev) => prev + text)
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (last && last.role === "assistant") {
+          return [...prev.slice(0, -1), { role: "assistant", text: last.text + text }]
+        }
+        return [...prev, { role: "assistant", text }]
+      })
       setStatus("responding")
       statusRef.current = "responding"
     })
@@ -220,8 +250,6 @@ export const Companion = () => {
     teardown()
     setStatus("idle")
     statusRef.current = "idle"
-    setAssistantText("")
-    setUserText("")
   }
 
   useEffect(() => {
@@ -330,17 +358,43 @@ export const Companion = () => {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>孩子说</Text>
-        <View style={styles.resultBox}>
-          <Text style={styles.resultText}>{userText || "…"}</Text>
+        <View style={styles.chatHeader}>
+          <Text style={styles.sectionTitle}>对话</Text>
+          <TouchableOpacity onPress={clearHistory} disabled={messages.length === 0}>
+            <Text style={[styles.clearButton, messages.length === 0 && styles.clearButtonDisabled]}>
+              清空
+            </Text>
+          </TouchableOpacity>
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>AI 回复</Text>
-        <View style={styles.resultBox}>
-          <Text style={styles.resultText}>{assistantText || "…"}</Text>
-        </View>
+        <ScrollView
+          ref={chatScrollRef}
+          style={styles.chatBox}
+          onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+        >
+          {messages.length === 0 ? (
+            <Text style={styles.chatEmpty}>开始对话吧…</Text>
+          ) : (
+            messages.map((m, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.chatBubble,
+                  m.role === "user" ? styles.userBubble : styles.assistantBubble,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.chatText,
+                    m.role === "user" ? styles.userChatText : styles.assistantChatText,
+                  ]}
+                >
+                  {m.text}
+                </Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
       </View>
     </ScrollView>
   ) : micAccess === "denied" ? (
@@ -368,7 +422,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: Colors.primary,
-    marginBottom: 6,
+    marginBottom: 0,
   },
   optionRow: {
     flexDirection: "row",
@@ -455,19 +509,55 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     flexShrink: 1,
   },
-  resultBox: {
+  chatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  clearButton: {
+    color: Colors.secondary,
+    fontSize: 13,
+  },
+  clearButtonDisabled: {
+    opacity: 0.4,
+  },
+  chatBox: {
     backgroundColor: Colors.bgInactive,
     borderRadius: 10,
-    padding: 12,
-    minHeight: 70,
-    justifyContent: "center",
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.primary,
+    padding: 10,
+    maxHeight: 320,
   },
-  resultText: {
-    fontSize: 16,
+  chatEmpty: {
+    color: Colors.secondary,
+    fontSize: 14,
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+  chatBubble: {
+    maxWidth: "85%",
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  userBubble: {
+    alignSelf: "flex-end",
+    backgroundColor: Colors.primary,
+  },
+  assistantBubble: {
+    alignSelf: "flex-start",
+    backgroundColor: Colors.bgActive,
+  },
+  chatText: {
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  userChatText: {
+    color: Colors.bgInactive,
+  },
+  assistantChatText: {
     color: Colors.primary,
-    lineHeight: 24,
   },
   loadingContainer: {
     flex: 1,
