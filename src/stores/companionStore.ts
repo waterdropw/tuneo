@@ -9,6 +9,9 @@ export type AgeMode = (typeof AGE_MODES)[number]
 export const COMPANION_VOICES = ["Cherry", "Serena", "Ethan", "Chelsie", "Jada"] as const
 export type CompanionVoice = (typeof COMPANION_VOICES)[number]
 
+export const VIDEO_MODES = ["off", "onDemand", "continuous"] as const
+export type VideoMode = (typeof VIDEO_MODES)[number]
+
 const INSTRUCTIONS: Record<AgeMode, string> = {
   toddler:
     "你是一个温柔、耐心的幼儿陪伴伙伴，正在和一个2-6岁的小朋友聊天。" +
@@ -30,8 +33,10 @@ export function getCompanionInstructions(ageMode: AgeMode): string {
 interface CompanionState {
   ageMode: AgeMode
   voice: CompanionVoice
+  videoMode: VideoMode
   setAgeMode: (mode: AgeMode) => void
   setVoice: (voice: CompanionVoice) => void
+  setVideoMode: (mode: VideoMode) => void
 }
 
 export const useCompanionStore = create<CompanionState>()(
@@ -39,8 +44,10 @@ export const useCompanionStore = create<CompanionState>()(
     (set) => ({
       ageMode: "auto",
       voice: "Cherry",
+      videoMode: "off",
       setAgeMode: (ageMode) => set({ ageMode }),
       setVoice: (voice) => set({ voice }),
+      setVideoMode: (videoMode) => set({ videoMode }),
     }),
     {
       name: "companion-store",
@@ -53,6 +60,9 @@ export const useCompanionStore = create<CompanionState>()(
         }
         if (saved.voice && COMPANION_VOICES.includes(saved.voice as any)) {
           loaded.voice = saved.voice
+        }
+        if (saved.videoMode && VIDEO_MODES.includes(saved.videoMode as any)) {
+          loaded.videoMode = saved.videoMode
         }
         return loaded
       },
