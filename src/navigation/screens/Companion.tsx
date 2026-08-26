@@ -102,6 +102,8 @@ export const Companion = () => {
 
   const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
+
+  // TODO(dev): 发版前移除 —— Prompt 调试（state + effect + resetPrompt）
   const [promptText, setPromptText] = useState(() => getCompanionInstructions(ageMode))
 
   useEffect(() => {
@@ -109,6 +111,7 @@ export const Companion = () => {
   }, [ageMode])
 
   const resetPrompt = () => setPromptText(getCompanionInstructions(ageMode))
+  // TODO(dev): 发版前移除 结束
 
   const serviceRef = useRef<OmniRealtimeService | null>(null)
   const playerRef = useRef<OmniAudioPlayer | null>(null)
@@ -247,7 +250,7 @@ export const Companion = () => {
     const config: OmniRealtimeConfig = {
       ...DEFAULT_OMNI_CONFIG,
       voice,
-      instructions: promptText,
+      instructions: promptText, // TODO(dev): 发版前改回 getCompanionInstructions(ageMode)
     }
 
     const service = new OmniRealtimeService(config)
@@ -420,6 +423,7 @@ export const Companion = () => {
         )}
       </View>
 
+      {/* TODO(dev): 发版前移除 —— Prompt 调试区块（下面整个 section） */}
       <View style={styles.section}>
         <View style={styles.chatHeader}>
           <Text style={styles.sectionTitle}>Prompt（调试，发版前移除）</Text>
@@ -625,6 +629,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  // TODO(dev): 发版前移除
   promptInput: {
     backgroundColor: Colors.bgInactive,
     borderRadius: 10,
