@@ -42,7 +42,7 @@ interface CompanionState {
 export const useCompanionStore = create<CompanionState>()(
   persist(
     (set) => ({
-      ageMode: "auto",
+      ageMode: "toddler",
       voice: "Tina",
       videoMode: "off",
       setAgeMode: (ageMode) => set({ ageMode }),
