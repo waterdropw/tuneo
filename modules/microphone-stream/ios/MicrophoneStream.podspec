@@ -17,7 +17,9 @@ Pod::Spec.new do |s|
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
+    'HEADER_SEARCH_PATHS' => '"$(PODS_TARGET_SRCROOT)/../cpp/libfvad/include"',
   }
 
-  s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
+  s.source_files = "**/*.{h,m,mm,swift,hpp,cpp,c}"
+  s.header_mappings_dir = "../cpp/libfvad/include"
 end
