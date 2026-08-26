@@ -5,8 +5,8 @@ import { zustandStorage } from "./localStorage"
 export const AGE_MODES = ["toddler", "child", "auto"] as const
 export type AgeMode = (typeof AGE_MODES)[number]
 
-// 注：音色 ID 为外部 API 数据，若调用报错请对照 DashScope 控制台核对。
-export const COMPANION_VOICES = ["Cherry", "Serena", "Ethan", "Chelsie", "Jada"] as const
+// 注：音色 ID 为外部 API 数据，若调用报错请对照 DashScope 控制台核对（qwen3.5-omni 系列默认 Tina）。
+export const COMPANION_VOICES = ["Tina", "Cherry", "Serena", "Ethan", "Chelsie", "Jada"] as const
 export type CompanionVoice = (typeof COMPANION_VOICES)[number]
 
 export const VIDEO_MODES = ["off", "onDemand", "continuous"] as const
@@ -43,7 +43,7 @@ export const useCompanionStore = create<CompanionState>()(
   persist(
     (set) => ({
       ageMode: "auto",
-      voice: "Cherry",
+      voice: "Tina",
       videoMode: "off",
       setAgeMode: (ageMode) => set({ ageMode }),
       setVoice: (voice) => set({ voice }),

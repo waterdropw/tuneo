@@ -39,8 +39,8 @@ export type OmniEvent =
   | "error"
 
 export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
-  model: "qwen3-omni-flash-realtime",
-  voice: "Cherry",
+  model: "qwen3.5-omni-flash-realtime-2026-03-15",
+  voice: "Tina",
   instructions: "",
   inputAudioFormat: "pcm",
   outputAudioFormat: "pcm",
@@ -89,10 +89,16 @@ export class OmniRealtimeService {
       this.resolveSessionUpdated = resolve
       this.rejectConnection = reject
 
-      const url = `${REALTIME_URL}?model=${encodeURIComponent(this.config.model)}&api_key=${encodeURIComponent(apiKey)}`
+      const url = `${REALTIME_URL}?model=${encodeURIComponent(this.config.model)}`
 
       try {
-        this.socket = new WebSocket(url)
+        // RN 的 WebSocket 运行时支持第三个 options 参数（headers），但 TS 类型未声明，故此处断言。
+        this.socket = new (WebSocket as any)(url, null, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "OpenAI-Beta": "realtime=v1",
+          },
+        }) as WebSocket
         this.socket.onopen = () => {
           this.connected = true
           console.log("[omni-realtime] WebSocket opened, sending session.update")
