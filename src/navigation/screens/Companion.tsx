@@ -127,7 +127,6 @@ export const Companion = () => {
   const prevLenRef = useRef(0)
   const audioSentRef = useRef(0)
   const imageSentRef = useRef(0)
-  const lastSpeechEndRef = useRef<number>(0)
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
@@ -203,8 +202,7 @@ export const Companion = () => {
   const armRebuild = () => {
     if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current)
     rebuildTimerRef.current = setTimeout(async () => {
-      const now = Date.now()
-      if (statusRef.current !== "idle" && now - lastSpeechEndRef.current >= 30000) {
+      if (statusRef.current !== "idle") {
         console.log("[companion] 30s silence, rebuilding session")
         const s = serviceRef.current
         if (s) {
@@ -314,8 +312,11 @@ export const Companion = () => {
       audioSourceRef.current = audioSource
       audioSource.setSpeechCallbacks(
         () => {
-          // 孩子开口：打断进行中的回复，并标记有新语音
-          lastSpeechEndRef.current = 0
+          // 孩子开口：打断进行中的回复，并取消静音重建定时器
+          if (rebuildTimerRef.current) {
+            clearTimeout(rebuildTimerRef.current)
+            rebuildTimerRef.current = null
+          }
           service.cancelResponse()
           playerRef.current?.stop()
           playerRef.current?.reset()
@@ -323,8 +324,7 @@ export const Companion = () => {
           statusRef.current = "listening"
         },
         () => {
-          // 人声结束：记录结束时间并重新武装重建定时器，再提交并触发回复
-          lastSpeechEndRef.current = Date.now()
+          // 人声结束：重新武装 30s 静音重建定时器，再提交并触发回复
           armRebuild()
           try {
             service.commitAudioBuffer()
@@ -346,7 +346,6 @@ export const Companion = () => {
       })
 
       // 启动 30s 静音重建定时器
-      lastSpeechEndRef.current = Date.now()
       armRebuild()
 
       if (videoMode !== "off" && cameraPermission?.granted) {
