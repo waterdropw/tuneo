@@ -290,18 +290,23 @@ export const Companion = () => {
           <Text style={styles.errorText}>未授权摄像头，请在系统设置中开启</Text>
         )}
 
-        {videoMode !== "off" && isRunning && cameraPermission?.granted && (
-          <>
+        {videoMode !== "off" &&
+          cameraPermission?.granted &&
+          (isRunning ? (
             <CameraView ref={cameraRef} facing="back" style={styles.camera} />
-            {videoMode === "onDemand" && (
-              <TouchableOpacity
-                style={styles.captureButton}
-                onPress={() => videoSourceRef.current?.captureFrame()}
-              >
-                <Text style={styles.buttonText}>看这个</Text>
-              </TouchableOpacity>
-            )}
-          </>
+          ) : (
+            <View style={styles.cameraPlaceholder}>
+              <Text style={styles.cameraPlaceholderText}>开始陪伴后显示摄像头画面</Text>
+            </View>
+          ))}
+
+        {videoMode === "onDemand" && isRunning && cameraPermission?.granted && (
+          <TouchableOpacity
+            style={styles.captureButton}
+            onPress={() => videoSourceRef.current?.captureFrame()}
+          >
+            <Text style={styles.buttonText}>看这个</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -379,6 +384,19 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: "hidden",
     marginTop: 10,
+  },
+  cameraPlaceholder: {
+    width: "100%",
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: Colors.bgInactive,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+  cameraPlaceholderText: {
+    color: Colors.secondary,
+    fontSize: 14,
   },
   captureButton: {
     backgroundColor: Colors.primary,
