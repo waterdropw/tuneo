@@ -52,7 +52,8 @@ export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
   inputAudioTranscription: { model: "qwen3-asr-flash-realtime" },
 }
 
-const REALTIME_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+const WORKSPACE_ID = process.env.EXPO_PUBLIC_DASHSCOPE_WORKSPACE_ID || "llm-3beld8asoiessbjf"
+const REALTIME_URL = `wss://${WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime`
 
 export class OmniRealtimeService {
   private config: OmniRealtimeConfig
