@@ -40,13 +40,13 @@ export type OmniEvent =
   | "error"
 
 export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
-  model: "qwen3.5-omni-flash-realtime-2026-03-15",
+  model: "qwen3.5-omni-flash-realtime",
   voice: "Tina",
   instructions: "",
   inputAudioFormat: "pcm",
   outputAudioFormat: "pcm",
   turnDetection: {
-    type: "semantic_vad",
+    type: "server_vad",
     threshold: 0.5,
     silenceDurationMs: 800,
   },
@@ -108,8 +108,14 @@ export class OmniRealtimeService {
           this.sendSessionUpdate()
         }
         this.socket.onmessage = (event) => this.onMessage(event)
-        this.socket.onerror = () => {
+        this.socket.onerror = (event: any) => {
           this.connected = false
+          console.error(
+            "[omni-realtime] WebSocket error event:",
+            JSON.stringify(event),
+            "message:",
+            (event as any)?.message ?? (event as any)?.nativeEvent?.message ?? "n/a"
+          )
           const err = new Error("[omni-realtime] WebSocket error")
           this.handleError(err)
           if (this.rejectConnection) {
@@ -118,7 +124,9 @@ export class OmniRealtimeService {
           }
         }
         this.socket.onclose = (event) => {
-          console.log(`[omni-realtime] WebSocket closed: ${event.code} ${event.reason}`)
+          console.log(
+            `[omni-realtime] WebSocket closed: code=${event.code} reason=${event.reason} message=${(event as any)?.message ?? "n/a"}`
+          )
           this.connected = false
           this.ready = false
           if (event.code !== 1000) {
@@ -268,7 +276,7 @@ export class OmniRealtimeService {
     } else if (type === "conversation.item.input_audio_transcription.completed") {
       console.log(`[omni-realtime] RECV ${type} ${message.transcript ?? ""}`)
     } else {
-      console.log(`[omni-realtime] RECV ${type}`)
+      console.log(`[omni-realtime] RECV ${type}`, JSON.stringify(message))
     }
   }
 
