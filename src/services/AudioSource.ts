@@ -10,6 +10,8 @@ export class AudioSource {
   private static instance: AudioSource | null = null;
   private isProcessing: boolean = false;
   private audioBufferHandler: ((processedData: any) => void) | null = null;
+  private speechStartHandler: (() => void) | null = null;
+  private speechEndHandler: (() => void) | null = null;
   
   // 单例模式，确保全局只有一个实例
   public static getInstance(): AudioSource {
@@ -50,10 +52,28 @@ export class AudioSource {
         this.processAudioBuffer(buffer);
       }
     );
-    
+
+    // 监听端侧 VAD 语音事件
+    MicrophoneStreamModule.addListener("onSpeechStart", () => {
+      this.speechStartHandler?.();
+    });
+    MicrophoneStreamModule.addListener("onSpeechEnd", () => {
+      this.speechEndHandler?.();
+    });
+
     console.log("Audio data processing started");
   }
-  
+
+  /**
+   * 注册语音事件回调（端侧 VAD 门控：onSpeechStart / onSpeechEnd）
+   * @param onStart 检测到人声开始时触发
+   * @param onEnd 人声结束（静音）时触发
+   */
+  public setSpeechCallbacks(onStart: () => void, onEnd: () => void): void {
+    this.speechStartHandler = onStart;
+    this.speechEndHandler = onEnd;
+  }
+
   /**
    * 停止处理音频数据
    */
@@ -72,6 +92,8 @@ export class AudioSource {
     
     this.isProcessing = false;
     this.audioBufferHandler = null;
+    this.speechStartHandler = null;
+    this.speechEndHandler = null;
     console.log("Audio data processing stopped");
   }
   

@@ -2,6 +2,8 @@ import { NativeModule, requireNativeModule } from "expo"
 
 export type MicrophoneStreamModuleEvents = {
   onAudioBuffer: (params: AudioBuffer) => void
+  onSpeechStart: () => void
+  onSpeechEnd: () => void
 }
 
 export type AudioBuffer = {

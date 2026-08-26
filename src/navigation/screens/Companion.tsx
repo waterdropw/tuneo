@@ -127,6 +127,8 @@ export const Companion = () => {
   const prevLenRef = useRef(0)
   const audioSentRef = useRef(0)
   const imageSentRef = useRef(0)
+  const lastSpeechEndRef = useRef<number>(0)
+  const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -182,6 +184,10 @@ export const Companion = () => {
   }
 
   const teardown = () => {
+    if (rebuildTimerRef.current) {
+      clearTimeout(rebuildTimerRef.current)
+      rebuildTimerRef.current = null
+    }
     audioSourceRef.current?.stopProcessing()
     audioSourceRef.current = null
     playerRef.current?.stop()
@@ -191,6 +197,26 @@ export const Companion = () => {
     videoSourceRef.current = null
     serviceRef.current?.disconnect()
     serviceRef.current = null
+  }
+
+  // 30s 静音重建会话：距最近一次 onSpeechEnd 满 30s 且期间无新语音则重连
+  const armRebuild = () => {
+    if (rebuildTimerRef.current) clearTimeout(rebuildTimerRef.current)
+    rebuildTimerRef.current = setTimeout(async () => {
+      const now = Date.now()
+      if (statusRef.current !== "idle" && now - lastSpeechEndRef.current >= 30000) {
+        console.log("[companion] 30s silence, rebuilding session")
+        const s = serviceRef.current
+        if (s) {
+          s.disconnect()
+          try {
+            await s.connect()
+          } catch (e) {
+            console.warn("[companion] rebuild connect failed", e)
+          }
+        }
+      }
+    }, 30000)
   }
 
   const handleEvent = (event: OmniEvent, data?: any) => {
@@ -286,6 +312,28 @@ export const Companion = () => {
 
       const audioSource = AudioSource.getInstance()
       audioSourceRef.current = audioSource
+      audioSource.setSpeechCallbacks(
+        () => {
+          // 孩子开口：打断进行中的回复，并标记有新语音
+          lastSpeechEndRef.current = 0
+          service.cancelResponse()
+          playerRef.current?.stop()
+          playerRef.current?.reset()
+          setStatus("listening")
+          statusRef.current = "listening"
+        },
+        () => {
+          // 人声结束：记录结束时间并重新武装重建定时器，再提交并触发回复
+          lastSpeechEndRef.current = Date.now()
+          armRebuild()
+          try {
+            service.commitAudioBuffer()
+            service.createResponse()
+          } catch (e) {
+            console.warn("[companion] commit/createResponse failed", e)
+          }
+        }
+      )
       audioSource.startProcessing((processed) => {
         if (processed?.data && service.isReady()) {
           try {
@@ -296,6 +344,10 @@ export const Companion = () => {
           }
         }
       })
+
+      // 启动 30s 静音重建定时器
+      lastSpeechEndRef.current = Date.now()
+      armRebuild()
 
       if (videoMode !== "off" && cameraPermission?.granted) {
         const videoSource = new VideoFrameSource()
