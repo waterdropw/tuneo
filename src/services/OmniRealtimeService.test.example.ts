@@ -55,4 +55,12 @@ service.appendAudio(new Int16Array([1, 2, 3]))
 assert(JSON.parse(sock.sent[sock.sent.length - 1]).type === "input_audio_buffer.append", "append type")
 assert(typeof JSON.parse(sock.sent[sock.sent.length - 1]).audio === "string", "append audio is base64")
 
+// appendImage 消息构造
+;(service as any).send = (m: any) => sock.sent.push(JSON.stringify(m))
+;(service as any).connected = true
+service.appendImage("aGVsbG8=")
+const img = JSON.parse(sock.sent[sock.sent.length - 1])
+assert(img.type === "input_image_buffer.append", "appendImage type")
+assert(img.image === "aGVsbG8=", "appendImage image field")
+
 console.log("OmniRealtimeService example assertions passed")

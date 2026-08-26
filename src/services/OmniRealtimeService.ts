@@ -167,6 +167,17 @@ export class OmniRealtimeService {
     this.send({ type: "input_audio_buffer.append", audio: int16ToBase64(samples) })
   }
 
+  // 将 JPEG 图像帧推入模型的输入图像缓冲（base64，单帧 ≤256KB）
+  appendImage(base64Jpg: string): void {
+    if (!this.connected || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("[omni-realtime] WebSocket is not connected.")
+    }
+    if (typeof base64Jpg !== "string" || base64Jpg.length === 0) {
+      throw new TypeError("[omni-realtime] Image must be a non-empty base64 string.")
+    }
+    this.send({ type: "input_image_buffer.append", image: base64Jpg })
+  }
+
   // 打断进行中的回复（孩子抢话时使用）
   cancelResponse(): void {
     this.send({ type: "response.cancel" })
