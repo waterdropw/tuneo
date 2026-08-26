@@ -8,7 +8,8 @@
  * 参考: https://docs.qwencloud.com/developer-guides/speech/realtime-multimodal-speech
  */
 
-import { int16ToBase64 } from "./audioCodec"
+import { int16ToBase64, resampleTo16k } from "./audioCodec"
+import MicrophoneStreamModule from "../../modules/microphone-stream"
 
 export interface OmniTurnDetection {
   type: "server_vad" | "semantic_vad"
@@ -68,6 +69,7 @@ export class OmniRealtimeService {
 
   private resolveSessionUpdated: ((value: void | PromiseLike<void>) => void) | null = null
   private rejectConnection: ((reason?: any) => void) | null = null
+  private sourceSampleRate: number | null = null
 
   constructor(config: OmniRealtimeConfig) {
     this.config = config
@@ -163,7 +165,7 @@ export class OmniRealtimeService {
     return this.connected && this.ready
   }
 
-  // 将 PCM 采样推入模型的输入音频缓冲
+  // 将 PCM 采样推入模型的输入音频缓冲（模型要求 16kHz，发送前统一重采样）
   appendAudio(samples: Int16Array): void {
     if (!this.connected || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("[omni-realtime] WebSocket is not connected.")
@@ -171,7 +173,16 @@ export class OmniRealtimeService {
     if (!(samples instanceof Int16Array)) {
       throw new TypeError("[omni-realtime] Audio data must be an Int16Array.")
     }
-    this.send({ type: "input_audio_buffer.append", audio: int16ToBase64(samples) })
+    const resampled = resampleTo16k(samples, this.getSourceSampleRate())
+    this.send({ type: "input_audio_buffer.append", audio: int16ToBase64(resampled) })
+  }
+
+  private getSourceSampleRate(): number {
+    if (this.sourceSampleRate === null) {
+      this.sourceSampleRate = MicrophoneStreamModule.getSampleRate() || 16000
+      console.log(`[omni-realtime] Mic sample rate: ${this.sourceSampleRate}Hz`)
+    }
+    return this.sourceSampleRate
   }
 
   // 将 JPEG 图像帧推入模型的输入图像缓冲（base64，单帧 ≤256KB）

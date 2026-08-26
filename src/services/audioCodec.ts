@@ -65,3 +65,23 @@ export function pcm16ToWav(
   new Uint8Array(buffer, 44).set(pcm)
   return new Uint8Array(buffer)
 }
+
+// 将 PCM 采样重采样到 16kHz（线性插值）。sourceRate 为原始采样率。
+export function resampleTo16k(samples: Int16Array, sourceRate: number): Int16Array {
+  const targetRate = 16000
+  if (!sourceRate || sourceRate <= 0 || sourceRate === targetRate) {
+    return samples
+  }
+  const ratio = sourceRate / targetRate
+  const outLen = Math.max(1, Math.round(samples.length / ratio))
+  const out = new Int16Array(outLen)
+  for (let i = 0; i < outLen; i++) {
+    const srcPos = i * ratio
+    const i0 = Math.min(Math.floor(srcPos), samples.length - 1)
+    const i1 = Math.min(i0 + 1, samples.length - 1)
+    const frac = srcPos - Math.floor(srcPos)
+    const v = samples[i0] * (1 - frac) + samples[i1] * frac
+    out[i] = Math.max(-32768, Math.min(32767, Math.round(v)))
+  }
+  return out
+}
