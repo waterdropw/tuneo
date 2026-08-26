@@ -387,7 +387,10 @@ export const Companion = () => {
         {videoMode === "onDemand" && isRunning && cameraPermission?.granted && (
           <TouchableOpacity
             style={styles.captureButton}
-            onPress={() => videoSourceRef.current?.captureFrame()}
+            onPress={() => {
+              setMessages((prev) => [...prev, { role: "user", text: "[图片]", ts: Date.now() }])
+              videoSourceRef.current?.captureFrame()
+            }}
           >
             <Text style={styles.buttonText}>看这个</Text>
           </TouchableOpacity>
