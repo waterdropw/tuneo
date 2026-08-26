@@ -10,7 +10,7 @@
     "scheme": "tuneo",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.donbraulio.tuneo"
+      "bundleIdentifier": "cn.neurizon.tuneo"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +21,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.donbraulio.tuneo"
+      "package": "cn.neurizon.tuneo"
     },
     "web": {
       "favicon": "./assets/favicon.png"
