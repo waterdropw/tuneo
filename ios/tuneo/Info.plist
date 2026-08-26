@@ -51,6 +51,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>允许使用摄像头来识别孩子指向的物体。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is needed to hear the instrument.</string>
 	<key>UILaunchStoryboardName</key>
