@@ -318,11 +318,15 @@ export const Companion = () => {
         >
           <Text style={styles.buttonText}>{isRunning ? "停止陪伴" : "开始陪伴"}</Text>
         </TouchableOpacity>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.statusText}>状态: {statusLabel}</Text>
-        {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+        <View style={styles.statusRow}>
+          <Text style={styles.statusText}>状态: {statusLabel}</Text>
+          {errorMsg ? (
+            <Text style={styles.errorText} numberOfLines={1}>
+              {errorMsg}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.section}>
@@ -439,10 +443,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
   errorText: {
     color: Colors.warn,
-    fontSize: 13,
-    marginTop: 6,
+    fontSize: 12,
+    marginLeft: 10,
+    flexShrink: 1,
   },
   resultBox: {
     backgroundColor: Colors.bgInactive,
