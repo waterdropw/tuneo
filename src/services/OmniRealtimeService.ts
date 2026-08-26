@@ -46,7 +46,7 @@ export const DEFAULT_OMNI_CONFIG: OmniRealtimeConfig = {
   inputAudioFormat: "pcm",
   outputAudioFormat: "pcm",
   turnDetection: {
-    type: "server_vad",
+    type: "semantic_vad",
     threshold: 0.5,
     silenceDurationMs: 800,
   },
