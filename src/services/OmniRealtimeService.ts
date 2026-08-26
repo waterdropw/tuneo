@@ -234,6 +234,31 @@ export class OmniRealtimeService {
       return
     }
     this.socket.send(JSON.stringify(message))
+    this.logOutgoing(message)
+  }
+
+  private logOutgoing(message: any): void {
+    const type = message.type
+    if (type === "input_audio_buffer.append") {
+      console.log(`[omni-realtime] SEND ${type} base64_len=${message.audio?.length ?? 0}`)
+    } else if (type === "input_image_buffer.append") {
+      console.log(`[omni-realtime] SEND ${type} base64_len=${message.image?.length ?? 0}`)
+    } else {
+      console.log(`[omni-realtime] SEND ${type}`)
+    }
+  }
+
+  private logIncoming(message: any): void {
+    const type = message.type
+    if (type === "response.audio.delta") {
+      console.log(`[omni-realtime] RECV ${type} base64_len=${message.delta?.length ?? 0}`)
+    } else if (type === "response.audio_transcript.delta") {
+      console.log(`[omni-realtime] RECV ${type} ${message.delta ?? ""}`)
+    } else if (type === "conversation.item.input_audio_transcription.completed") {
+      console.log(`[omni-realtime] RECV ${type} ${message.transcript ?? ""}`)
+    } else {
+      console.log(`[omni-realtime] RECV ${type}`)
+    }
   }
 
   private onMessage(event: MessageEvent): void {
@@ -247,6 +272,8 @@ export class OmniRealtimeService {
       console.warn("[omni-realtime] Failed to parse message", event.data)
       return
     }
+
+    this.logIncoming(message)
 
     switch (message.type) {
       case "session.created":
