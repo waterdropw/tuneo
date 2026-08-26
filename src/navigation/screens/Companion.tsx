@@ -98,6 +98,7 @@ export const Companion = () => {
   })
   const [errorMsg, setErrorMsg] = useState("")
   const [visibleCount, setVisibleCount] = useState(DISPLAY_BATCH)
+  const [sentStats, setSentStats] = useState({ audio: 0, image: 0 })
 
   const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
@@ -114,6 +115,8 @@ export const Companion = () => {
   const messagesRef = useRef<ChatMessage[]>([])
   const lastSavedLenRef = useRef(0)
   const prevLenRef = useRef(0)
+  const audioSentRef = useRef(0)
+  const imageSentRef = useRef(0)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -151,6 +154,13 @@ export const Companion = () => {
       persistMessages(messages)
     }
   }, [messages])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSentStats({ audio: audioSentRef.current, image: imageSentRef.current })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const clearHistory = () => {
     setMessages([])
@@ -221,6 +231,9 @@ export const Companion = () => {
   const handleStart = async () => {
     stoppingRef.current = false
     setErrorMsg("")
+    audioSentRef.current = 0
+    imageSentRef.current = 0
+    setSentStats({ audio: 0, image: 0 })
     setStatus("connecting")
     statusRef.current = "connecting"
 
@@ -265,6 +278,7 @@ export const Companion = () => {
         if (processed?.data && service.isReady()) {
           try {
             service.appendAudio(processed.data)
+            audioSentRef.current += 1
           } catch (e) {
             console.warn("[companion] appendAudio failed", e)
           }
@@ -278,6 +292,7 @@ export const Companion = () => {
           if (service.isReady()) {
             try {
               service.appendImage(b64)
+              imageSentRef.current += 1
             } catch (e) {
               console.warn("[companion] appendImage failed", e)
             }
@@ -302,6 +317,7 @@ export const Companion = () => {
     teardown()
     persistMessages(messagesRef.current)
     lastSavedLenRef.current = messagesRef.current.length
+    setSentStats({ audio: audioSentRef.current, image: imageSentRef.current })
     setStatus("idle")
     statusRef.current = "idle"
   }
@@ -413,6 +429,9 @@ export const Companion = () => {
             </Text>
           ) : null}
         </View>
+        <Text style={styles.sentStatsText}>
+          音频 {sentStats.audio} 块 · 图片 {sentStats.image} 帧
+        </Text>
       </View>
 
       <View style={styles.section}>
@@ -575,6 +594,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 10,
     flexShrink: 1,
+  },
+  sentStatsText: {
+    color: Colors.secondary,
+    fontSize: 12,
+    marginTop: 4,
   },
   chatHeader: {
     flexDirection: "row",
