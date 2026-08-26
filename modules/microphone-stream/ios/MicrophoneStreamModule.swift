@@ -10,7 +10,6 @@ let BUF_PER_SEC = 10
 @_silgen_name("fvad_set_sample_rate") private func fvad_set_sample_rate(_ inst: OpaquePointer?, _ rate: Int32) -> Int32
 @_silgen_name("fvad_set_mode") private func fvad_set_mode(_ inst: OpaquePointer?, _ mode: Int32) -> Int32
 @_silgen_name("fvad_process") private func fvad_process(_ inst: OpaquePointer?, _ frame: UnsafePointer<Int16>?, _ length: Int) -> Int32
-@_silgen_name("fvad_reset") private func fvad_reset(_ inst: OpaquePointer?)
 @_silgen_name("fvad_free") private func fvad_free(_ inst: OpaquePointer?)
 
 private let VAD_FRAME_MS = 20
@@ -27,6 +26,7 @@ public class MicrophoneStreamModule: Module {
   private var vad: OpaquePointer? = nil
   private var sampleRateForVad = 48000
   private var speechActive = false
+  private var justStartedSpeech = false
   private var speechStreak = 0
   private var silenceStreak = 0
   private var preRoll: [Float] = []
@@ -74,6 +74,9 @@ public class MicrophoneStreamModule: Module {
                       let frameLength = Int(buffer.frameLength)
                       let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
 
+                      // 每次回调开始时复位「本回调内刚进入 speech」标记
+                      self.justStartedSpeech = false
+
                       if self.vad == nil {
                         // VAD 不可用：回退为始终 emit（旧行为）
                         self.sendEvent("onAudioBuffer", ["samples": samples])
@@ -92,7 +95,9 @@ public class MicrophoneStreamModule: Module {
 
                       self.processVadFrames(samples)
 
-                      if self.speechActive {
+                      // 若 speech 在本回调内刚触发，pre-roll flush 已包含当前 buffer，
+                      // 此处跳过以避免约 100ms 重复发送
+                      if self.speechActive && !self.justStartedSpeech {
                         self.sendEvent("onAudioBuffer", ["samples": samples])
                       }
                   }
@@ -136,6 +141,7 @@ public class MicrophoneStreamModule: Module {
   }
 
   private func initVad() {
+    if vad != nil { fvad_free(vad) }
     guard let v = fvad_new() else { return }
     vad = v
     if fvad_set_sample_rate(v, Int32(sampleRateForVad)) != 0 {
@@ -175,6 +181,7 @@ public class MicrophoneStreamModule: Module {
       silenceStreak = 0
       if !speechActive && speechStreak >= SPEECH_TRIGGER_FRAMES {
         speechActive = true
+        justStartedSpeech = true
         // flush pre-roll 缓冲
         if !preRoll.isEmpty {
           sendEvent("onAudioBuffer", ["samples": preRoll])
