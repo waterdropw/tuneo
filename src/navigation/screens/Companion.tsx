@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from "react-native"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Vibration } from "react-native"
 import { AudioModule } from "expo-audio"
 import * as FileSystem from "expo-file-system"
 import Colors from "@/colors"
@@ -196,6 +196,7 @@ export const Companion = () => {
   const handleEvent = (event: OmniEvent, data?: any) => {
     switch (event) {
       case "session-updated":
+        Vibration.vibrate(80)
         setStatus("listening")
         statusRef.current = "listening"
         break
@@ -228,6 +229,7 @@ export const Companion = () => {
         statusRef.current = "listening"
         break
       case "error":
+        Vibration.vibrate([0, 200, 100, 200])
         teardown()
         setErrorMsg(typeof data?.message === "string" ? data.message : "连接出错")
         setStatus("idle")
