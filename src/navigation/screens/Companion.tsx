@@ -286,22 +286,23 @@ export const Companion = () => {
           </TouchableOpacity>
         </Picker>
 
-        {videoMode !== "off" &&
-          (cameraPermission?.granted ? (
-            <>
-              <CameraView ref={cameraRef} facing="back" style={styles.camera} />
-              {videoMode === "onDemand" && (
-                <TouchableOpacity
-                  style={styles.captureButton}
-                  onPress={() => videoSourceRef.current?.captureFrame()}
-                >
-                  <Text style={styles.buttonText}>看这个</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          ) : (
-            <Text style={styles.errorText}>未授权摄像头，请在系统设置中开启</Text>
-          ))}
+        {videoMode !== "off" && cameraPermission && !cameraPermission.granted && (
+          <Text style={styles.errorText}>未授权摄像头，请在系统设置中开启</Text>
+        )}
+
+        {videoMode !== "off" && isRunning && cameraPermission?.granted && (
+          <>
+            <CameraView ref={cameraRef} facing="back" style={styles.camera} />
+            {videoMode === "onDemand" && (
+              <TouchableOpacity
+                style={styles.captureButton}
+                onPress={() => videoSourceRef.current?.captureFrame()}
+              >
+                <Text style={styles.buttonText}>看这个</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
       </View>
 
       <View style={styles.section}>
