@@ -286,17 +286,16 @@ export const Companion = () => {
           </TouchableOpacity>
         </Picker>
 
-        {videoMode !== "off" && cameraPermission && !cameraPermission.granted && (
-          <Text style={styles.errorText}>未授权摄像头，请在系统设置中开启</Text>
-        )}
-
         {videoMode !== "off" &&
-          cameraPermission?.granted &&
-          (isRunning ? (
+          (isRunning && cameraPermission?.granted ? (
             <CameraView ref={cameraRef} facing="back" style={styles.camera} />
           ) : (
             <View style={styles.cameraPlaceholder}>
-              <Text style={styles.cameraPlaceholderText}>开始陪伴后显示摄像头画面</Text>
+              <Text style={styles.cameraPlaceholderText}>
+                {cameraPermission && !cameraPermission.granted
+                  ? "未授权摄像头，请在系统设置中开启"
+                  : "开始陪伴后显示摄像头画面"}
+              </Text>
             </View>
           ))}
 
