@@ -12,13 +12,17 @@ import {
   DEFAULT_OMNI_CONFIG,
 } from "@/services/OmniRealtimeService"
 import { OmniAudioPlayer } from "@/services/OmniAudioPlayer"
+import { VideoFrameSource } from "@/services/VideoFrameSource"
+import { CameraView, useCameraPermissions } from "expo-camera"
 import {
   useCompanionStore,
   getCompanionInstructions,
   AGE_MODES,
   COMPANION_VOICES,
+  VIDEO_MODES,
   AgeMode,
   CompanionVoice,
+  VideoMode,
 } from "@/stores/companionStore"
 import { MenuAction } from "@react-native-menu/menu"
 
@@ -31,6 +35,12 @@ const AGE_MODE_TITLES: Record<AgeMode, string> = {
   auto: "自适应",
 }
 
+const VIDEO_MODE_TITLES: Record<VideoMode, string> = {
+  off: "关",
+  onDemand: "按需抓帧",
+  continuous: "持续推送",
+}
+
 export const Companion = () => {
   const [micAccess, setMicAccess] = useState<MicrophoneAccess>("pending")
   const [status, setStatus] = useState<SessionStatus>("idle")
@@ -38,16 +48,20 @@ export const Companion = () => {
   const [userText, setUserText] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
 
-  const { ageMode, voice, setAgeMode, setVoice } = useCompanionStore()
+  const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions()
 
   const serviceRef = useRef<OmniRealtimeService | null>(null)
   const playerRef = useRef<OmniAudioPlayer | null>(null)
   const audioSourceRef = useRef<AudioSource | null>(null)
   const statusRef = useRef<SessionStatus>("idle")
   const stoppingRef = useRef(false)
+  const cameraRef = useRef<CameraView>(null)
+  const videoSourceRef = useRef<VideoFrameSource | null>(null)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
+  const videoModeOptions: MenuAction[] = VIDEO_MODES.map((m) => ({ id: m, title: VIDEO_MODE_TITLES[m] }))
 
   useEffect(() => {
     ;(async () => {
@@ -57,12 +71,25 @@ export const Companion = () => {
     })()
   }, [])
 
+  useEffect(() => {
+    if (
+      videoMode !== "off" &&
+      cameraPermission &&
+      !cameraPermission.granted &&
+      cameraPermission.canAskAgain
+    ) {
+      requestCameraPermission()
+    }
+  }, [videoMode, cameraPermission, requestCameraPermission])
+
   const teardown = () => {
     audioSourceRef.current?.stopProcessing()
     audioSourceRef.current = null
     playerRef.current?.stop()
     playerRef.current?.reset()
     playerRef.current = null
+    videoSourceRef.current?.stop()
+    videoSourceRef.current = null
     serviceRef.current?.disconnect()
     serviceRef.current = null
   }
@@ -158,6 +185,22 @@ export const Companion = () => {
           }
         }
       })
+
+      if (videoMode !== "off" && cameraPermission?.granted) {
+        const videoSource = new VideoFrameSource()
+        videoSource.setCameraRef(cameraRef)
+        videoSource.setFrameCallback((b64) => {
+          if (service.isReady()) {
+            try {
+              service.appendImage(b64)
+            } catch (e) {
+              console.warn("[companion] appendImage failed", e)
+            }
+          }
+        })
+        videoSource.start(videoMode)
+        videoSourceRef.current = videoSource
+      }
     } catch (e) {
       if (stoppingRef.current) {
         return
@@ -182,6 +225,7 @@ export const Companion = () => {
     return () => {
       audioSourceRef.current?.stopProcessing()
       playerRef.current?.stop()
+      videoSourceRef.current?.stop()
       serviceRef.current?.disconnect()
     }
   }, [])
@@ -224,6 +268,37 @@ export const Companion = () => {
             <Text style={styles.pickerButtonText}>{voice}</Text>
           </TouchableOpacity>
         </Picker>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>视频</Text>
+        <Picker
+          actions={videoModeOptions}
+          onSelect={(id) => setVideoMode(id as VideoMode)}
+          value={videoMode}
+          disabled={isRunning}
+        >
+          <TouchableOpacity style={styles.pickerButton}>
+            <Text style={styles.pickerButtonText}>{VIDEO_MODE_TITLES[videoMode]}</Text>
+          </TouchableOpacity>
+        </Picker>
+
+        {videoMode !== "off" &&
+          (cameraPermission?.granted ? (
+            <>
+              <CameraView ref={cameraRef} facing="back" style={styles.camera} />
+              {videoMode === "onDemand" && (
+                <TouchableOpacity
+                  style={styles.captureButton}
+                  onPress={() => videoSourceRef.current?.captureFrame()}
+                >
+                  <Text style={styles.buttonText}>看这个</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            <Text style={styles.errorText}>未授权摄像头，请在系统设置中开启</Text>
+          ))}
       </View>
 
       <View style={styles.section}>
@@ -293,6 +368,20 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: "bold",
     fontSize: 14,
+  },
+  camera: {
+    width: "100%",
+    height: 200,
+    borderRadius: 10,
+    overflow: "hidden",
+    marginTop: 10,
+  },
+  captureButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 10,
   },
   button: {
     paddingVertical: 14,
