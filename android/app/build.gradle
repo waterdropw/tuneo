@@ -86,9 +86,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.donbraulio.tuneo'
+    namespace 'cn.neurizon.tuneo'
     defaultConfig {
-        applicationId 'com.donbraulio.tuneo'
+        applicationId 'cn.neurizon.tuneo'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

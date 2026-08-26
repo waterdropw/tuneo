@@ -1,4 +1,4 @@
-package com.donbraulio.tuneo
+package cn.neurizon.tuneo
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
