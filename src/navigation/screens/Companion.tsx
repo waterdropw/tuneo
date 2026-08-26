@@ -246,45 +246,47 @@ export const Companion = () => {
   return micAccess === "granted" ? (
     <ScrollView style={styles.container}>
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>年龄段</Text>
-        <Picker
-          actions={ageOptions}
-          onSelect={(id) => setAgeMode(id as AgeMode)}
-          value={ageMode}
-          disabled={isRunning}
-        >
-          <TouchableOpacity style={styles.pickerButton}>
-            <Text style={styles.pickerButtonText}>{AGE_MODE_TITLES[ageMode]}</Text>
-          </TouchableOpacity>
-        </Picker>
-      </View>
+        <View style={styles.optionRow}>
+          <Text style={styles.optionLabel}>年龄段</Text>
+          <Picker
+            actions={ageOptions}
+            onSelect={(id) => setAgeMode(id as AgeMode)}
+            value={ageMode}
+            disabled={isRunning}
+          >
+            <TouchableOpacity style={styles.optionButton}>
+              <Text style={styles.optionButtonText}>{AGE_MODE_TITLES[ageMode]}</Text>
+            </TouchableOpacity>
+          </Picker>
+        </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>音色</Text>
-        <Picker
-          actions={voiceOptions}
-          onSelect={(id) => setVoice(id as CompanionVoice)}
-          value={voice}
-          disabled={isRunning}
-        >
-          <TouchableOpacity style={styles.pickerButton}>
-            <Text style={styles.pickerButtonText}>{voice}</Text>
-          </TouchableOpacity>
-        </Picker>
-      </View>
+        <View style={styles.optionRow}>
+          <Text style={styles.optionLabel}>音色</Text>
+          <Picker
+            actions={voiceOptions}
+            onSelect={(id) => setVoice(id as CompanionVoice)}
+            value={voice}
+            disabled={isRunning}
+          >
+            <TouchableOpacity style={styles.optionButton}>
+              <Text style={styles.optionButtonText}>{voice}</Text>
+            </TouchableOpacity>
+          </Picker>
+        </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>视频</Text>
-        <Picker
-          actions={videoModeOptions}
-          onSelect={(id) => setVideoMode(id as VideoMode)}
-          value={videoMode}
-          disabled={isRunning}
-        >
-          <TouchableOpacity style={styles.pickerButton}>
-            <Text style={styles.pickerButtonText}>{VIDEO_MODE_TITLES[videoMode]}</Text>
-          </TouchableOpacity>
-        </Picker>
+        <View style={styles.optionRow}>
+          <Text style={styles.optionLabel}>视频</Text>
+          <Picker
+            actions={videoModeOptions}
+            onSelect={(id) => setVideoMode(id as VideoMode)}
+            value={videoMode}
+            disabled={isRunning}
+          >
+            <TouchableOpacity style={styles.optionButton}>
+              <Text style={styles.optionButtonText}>{VIDEO_MODE_TITLES[videoMode]}</Text>
+            </TouchableOpacity>
+          </Picker>
+        </View>
 
         {videoMode !== "off" &&
           (isRunning && cameraPermission?.granted ? (
@@ -354,28 +356,39 @@ const styles = StyleSheet.create({
   },
   section: {
     backgroundColor: Colors.bgActive,
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 15,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: "bold",
     color: Colors.primary,
-    marginBottom: 10,
+    marginBottom: 6,
   },
-  pickerButton: {
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+  optionLabel: {
+    color: Colors.primary,
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+  optionButton: {
     backgroundColor: Colors.bgInactive,
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: Colors.primary,
-    alignItems: "center",
   },
-  pickerButtonText: {
+  optionButtonText: {
     color: Colors.primary,
     fontWeight: "bold",
-    fontSize: 14,
+    fontSize: 13,
   },
   camera: {
     width: "100%",
