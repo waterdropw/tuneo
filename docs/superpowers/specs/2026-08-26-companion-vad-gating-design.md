@@ -61,7 +61,7 @@ JS 层（Companion）
                                     [回到静音]
 ```
 
-- **触发人声开始**：VAD 连续 3 帧（约 30ms）判 speech，且带 pre-roll 前置缓冲 300ms（补发 VAD 判定前丢失的开头音节）
+- **触发人声开始**：VAD 连续 3 帧（20ms/帧，共约 60ms）判 speech，且带 pre-roll 前置缓冲 300ms（补发 VAD 判定前丢失的开头音节）
 - **判定人声结束**：VAD 连续判非 speech 达 800ms（对齐现有 `silenceDurationMs`）
 
 ## 4. 组件改动
