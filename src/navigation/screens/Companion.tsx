@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react"
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from "react-native"
 import { AudioModule } from "expo-audio"
 import * as FileSystem from "expo-file-system"
 import Colors from "@/colors"
@@ -102,6 +102,13 @@ export const Companion = () => {
 
   const { ageMode, voice, videoMode, setAgeMode, setVoice, setVideoMode } = useCompanionStore()
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
+  const [promptText, setPromptText] = useState(() => getCompanionInstructions(ageMode))
+
+  useEffect(() => {
+    setPromptText(getCompanionInstructions(ageMode))
+  }, [ageMode])
+
+  const resetPrompt = () => setPromptText(getCompanionInstructions(ageMode))
 
   const serviceRef = useRef<OmniRealtimeService | null>(null)
   const playerRef = useRef<OmniAudioPlayer | null>(null)
@@ -240,7 +247,7 @@ export const Companion = () => {
     const config: OmniRealtimeConfig = {
       ...DEFAULT_OMNI_CONFIG,
       voice,
-      instructions: getCompanionInstructions(ageMode),
+      instructions: promptText,
     }
 
     const service = new OmniRealtimeService(config)
@@ -411,6 +418,24 @@ export const Companion = () => {
             <Text style={styles.buttonText}>看这个</Text>
           </TouchableOpacity>
         )}
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.chatHeader}>
+          <Text style={styles.sectionTitle}>Prompt（调试，发版前移除）</Text>
+          <TouchableOpacity onPress={resetPrompt}>
+            <Text style={styles.clearButton}>重置</Text>
+          </TouchableOpacity>
+        </View>
+        <TextInput
+          style={styles.promptInput}
+          value={promptText}
+          onChangeText={setPromptText}
+          editable={!isRunning}
+          multiline
+          placeholder="输入系统提示词"
+          placeholderTextColor={Colors.secondary}
+        />
       </View>
 
       <View style={styles.section}>
@@ -599,6 +624,17 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
     fontSize: 12,
     marginTop: 4,
+  },
+  promptInput: {
+    backgroundColor: Colors.bgInactive,
+    borderRadius: 10,
+    padding: 12,
+    color: Colors.primary,
+    fontSize: 13,
+    lineHeight: 19,
+    minHeight: 120,
+    maxHeight: 220,
+    textAlignVertical: "top",
   },
   chatHeader: {
     flexDirection: "row",
