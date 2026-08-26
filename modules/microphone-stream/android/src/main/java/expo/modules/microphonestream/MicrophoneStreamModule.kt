@@ -13,7 +13,8 @@ val BUF_PER_SEC = 10
 class MicrophoneStreamModule : Module() {
 
     private var audioRecord: AudioRecord? = null
-    private var isRecording = false
+    private var readThread: Thread? = null
+    @Volatile private var isRecording = false
     private val sampleRate = 16000 // Default sample rate
     private val bufferSize = maxOf(
         sampleRate / BUF_PER_SEC,
@@ -29,7 +30,7 @@ class MicrophoneStreamModule : Module() {
     private external fun nativeVadProcess(handle: Long, frame: ShortArray, length: Int): Int
     private external fun nativeVadFree(handle: Long)
 
-    private var vadHandle = 0L
+    @Volatile private var vadHandle = 0L
     private val vadFrameMs = 20
     private val speechTriggerFrames = 3
     private val silenceEndFrames = 40
@@ -89,7 +90,7 @@ class MicrophoneStreamModule : Module() {
 
         initVad()
 
-        thread {
+        readThread = thread {
             val buffer = ShortArray(bufferSize)
             while (isRecording) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
@@ -140,6 +141,10 @@ class MicrophoneStreamModule : Module() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+
+        // 等待读线程退出，确保其不再于 nativeVadProcess 中使用已释放的 vadHandle
+        readThread?.join(1000)
+        readThread = null
 
         if (vadHandle != 0L) {
             nativeVadFree(vadHandle)

@@ -242,15 +242,24 @@ export const Companion = () => {
       case "assistant-transcript-delta":
         setStatus("responding")
         statusRef.current = "responding"
+        // 回复进行中不计静音时长：取消 30s 重建定时器，避免回复中途被重建
+        if (rebuildTimerRef.current) {
+          clearTimeout(rebuildTimerRef.current)
+          rebuildTimerRef.current = null
+        }
         break
       case "audio-done":
         playerRef.current?.play()
         setStatus("listening")
         statusRef.current = "listening"
+        // 回复结束回到聆听：重新武装 30s 静音重建定时器
+        armRebuild()
         break
       case "response-done":
         setStatus("listening")
         statusRef.current = "listening"
+        // 回复结束回到聆听：重新武装 30s 静音重建定时器
+        armRebuild()
         break
       case "error":
         Vibration.vibrate([0, 200, 100, 200])
@@ -297,6 +306,11 @@ export const Companion = () => {
       })
       setStatus("responding")
       statusRef.current = "responding"
+      // 回复进行中不计静音时长：取消 30s 重建定时器，避免回复中途被重建
+      if (rebuildTimerRef.current) {
+        clearTimeout(rebuildTimerRef.current)
+        rebuildTimerRef.current = null
+      }
     })
     service.setErrorCallback((err) => {
       teardown()

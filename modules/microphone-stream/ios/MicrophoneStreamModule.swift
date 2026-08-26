@@ -125,8 +125,8 @@ public class MicrophoneStreamModule: Module {
   }
 
   private func stopRecording() {
-    audioEngine.inputNode.removeTap(onBus: 0)
     audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
     // Don't deactivate the audio session to allow for immediate playback
     audioBufferHandler = nil
 
