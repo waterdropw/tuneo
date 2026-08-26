@@ -12,7 +12,7 @@ import { CloseButton } from "@/components/CloseButton"
 import { Platform } from "react-native"
 
 const RootStack = createNativeStackNavigator({
-  initialRouteName: "bilingual",
+  initialRouteName: "Companion",
   screens: {
     Tuneo: {
       screen: Tuneo,
