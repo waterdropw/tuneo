@@ -42,6 +42,7 @@ public class MicrophoneStreamModule: Module {
   private var preRoll: [Float] = []
   private var preRollCapacity = 0
   private var noiseFloor: Float = FLOOR_INIT
+  private var graceFramesRemaining = 0
 
   // Each module class must implement the definition function. The definition consists of components
   // that describes the module's functionality and behavior.
@@ -175,6 +176,7 @@ public class MicrophoneStreamModule: Module {
     _ = fvad_set_mode(v, 2) // 2 = 中等激进度
     preRollCapacity = sampleRateForVad * 300 / 1000 // 300ms
     preRoll = Array(repeating: 0, count: preRollCapacity)
+    graceFramesRemaining = 25 // 500ms / 20ms：冷启动宽限期，直喂 libfvad 收敛底噪
     print("[vad] initialized at \(sampleRateForVad)Hz, preRollCapacity=\(preRollCapacity)")
   }
 
@@ -187,11 +189,15 @@ public class MicrophoneStreamModule: Module {
       let frame = Array(samples[offset..<(offset + frameLen)])
       let rms = computeRms(frame)
 
-      if rms < noiseFloor * SNR_K {
-        // 能量门控：低能量直接判 silence，跳过 libfvad，并下探底噪
+      let inGrace = graceFramesRemaining > 0
+      if inGrace { graceFramesRemaining -= 1 }
+
+      if !inGrace && rms < noiseFloor * SNR_K {
+        // 能量门控：低能量直接判 silence，跳过 libfvad，并更新底噪（快降/慢升）
         noiseFloor = updateNoiseFloor(noiseFloor, rms: rms)
         updateVadState(isSpeech: false)
       } else {
+        // 冷启动宽限期内，或能量够高：直喂 libfvad 精判
         // libfvad 的 fvad_process 需要 Int16 PCM，先 clamp 再转 Int16
         let frameInt16: [Int16] = frame.map { sample in
           let clamped = max(-1.0, min(1.0, sample))

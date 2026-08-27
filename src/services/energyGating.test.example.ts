@@ -26,4 +26,12 @@ assert(floorDown > 0.01 && floorDown < 0.25, "floor moves down toward quiet rms"
 const floorMin = updateNoiseFloor(1e-7, 1e-9, ENERGY_GATING)
 assert(floorMin >= ENERGY_GATING.min, "floor clamped above min")
 
+// updateNoiseFloor：慢升路径（rms=0.05 在 [floor, floor×cap) 内，取 alphaUp=0.05）
+const floorUp = updateNoiseFloor(0.02, 0.05, ENERGY_GATING)
+assert(Math.abs(floorUp - 0.0215) < 1e-9, "slow-up: 0.95*0.02 + 0.05*0.05 = 0.0215")
+assert(floorUp > 0.02, "slow-up floor is above input floor")
+
+// shouldGateByEnergy：严格小于才门控，rms == floor×k 边界不门控
+assert(shouldGateByEnergy(1.0, 0.25, 4.0) === false, "rms == floor*k is not gated")
+
 console.log("energyGating example assertions passed")
