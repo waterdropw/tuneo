@@ -150,10 +150,14 @@ public class MicrophoneStreamModule: Module {
 
   private func initVad() {
     if vad != nil { fvad_free(vad) }
-    guard let v = fvad_new() else { return }
+    guard let v = fvad_new() else {
+      print("[vad] fvad_new failed — will fall back to always-emit")
+      return
+    }
     vad = v
     if fvad_set_sample_rate(v, Int32(sampleRateForVad)) != 0 {
       // libfvad 仅支持 8k/16k/32k/48k：采样率不受支持时释放并回退为始终 emit
+      print("[vad] unsupported sample rate \(sampleRateForVad) — will fall back to always-emit")
       fvad_free(v)
       vad = nil
       return
@@ -161,6 +165,7 @@ public class MicrophoneStreamModule: Module {
     _ = fvad_set_mode(v, 2) // 2 = 中等激进度
     preRollCapacity = sampleRateForVad * 300 / 1000 // 300ms
     preRoll = Array(repeating: 0, count: preRollCapacity)
+    print("[vad] initialized at \(sampleRateForVad)Hz, preRollCapacity=\(preRollCapacity)")
   }
 
   // 将一段 Float 样本切帧喂 VAD，内部按帧更新 speech 状态
@@ -177,6 +182,9 @@ public class MicrophoneStreamModule: Module {
       }
       let isSpeech = frameInt16.withUnsafeBufferPointer { buf in
         fvad_process(v, buf.baseAddress, frameLen) == 1
+      }
+      if isSpeech {
+        print("[vad] frame=speech")
       }
       updateVadState(isSpeech: isSpeech)
       offset += frameLen
