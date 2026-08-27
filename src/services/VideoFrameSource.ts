@@ -65,7 +65,13 @@ export class VideoFrameSource {
   }
 
   async captureFrame(): Promise<void> {
-    if (this.busy || !this.cameraRef?.current) {
+    if (this.busy) {
+      // 已有 capture 在跑，其 finally 会续链，直接返回避免并发
+      return
+    }
+    if (!this.cameraRef?.current) {
+      // 摄像头暂不可用：续链后再返回，避免 setTimeout 链永久中断
+      this.scheduleNext()
       return
     }
     this.busy = true
