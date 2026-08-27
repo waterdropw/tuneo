@@ -33,7 +33,7 @@ export function shouldGateByEnergy(rms: number, floor: number, k: number): boole
   return rms < floor * k
 }
 
-// 底噪更新：仅在 libfvad 判 silence 时调用；能量超上限（瞬态）则不更新
+// 底噪更新：仅在判 silence（门控判 silence 或 libfvad 判 silence）时调用；能量超上限（瞬态）则不更新
 export function updateNoiseFloor(
   floor: number,
   rms: number,

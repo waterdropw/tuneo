@@ -34,12 +34,12 @@
       ├─ energy < floor × K → 直接判 silence（跳过 libfvad）
       └─ energy ≥ floor × K → 喂 libfvad → 精判 speech/silence
   → ③ 更新状态机（沿用现有 3帧触发 / 40帧结束）
-  → ④ 若 libfvad 判 silence 且 energy 未超上限 → 更新 floor（指数平滑）
+  → ④ 若判 silence（门控判 silence 或 libfvad 判 silence）且 energy 未超上限 → 更新 floor（指数平滑）
 ```
 
 ### 3.1 关键设计点
 
-1. **底噪只在「libfvad 判 silence」时更新**——孩子说话的帧（speech）floor 冻结不动，避免把语音能量算进底噪。
+1. **底噪只在「判 silence」（门控判 silence 或 libfvad 判 silence）时更新**——孩子说话的帧（speech）floor 冻结不动，避免把语音能量算进底噪。
 2. **能量门控是「粗筛」不是「最终判定」**——高能量非语音（拍手、关门）会进 libfvad，由 libfvad 判 silence，两层各司其职。
 3. **门控阈值用 SNR（信噪比）**——`energy >= floor × K`，K 对应固定 dB 数，随 floor 自适应，不依赖绝对能量。
 
