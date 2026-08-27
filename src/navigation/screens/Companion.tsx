@@ -566,7 +566,7 @@ export const Companion = () => {
                 >
                   {!isUser && (
                     <View style={[styles.avatar, styles.assistantAvatar]}>
-                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.bgInactive} />
+                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.primary} />
                     </View>
                   )}
                   <View style={[styles.chatBubble, isUser ? styles.userBubble : styles.assistantBubble]}>
@@ -578,7 +578,7 @@ export const Companion = () => {
                   </View>
                   {isUser && (
                     <View style={[styles.avatar, styles.userAvatar]}>
-                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.bgInactive} />
+                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.primary} />
                     </View>
                   )}
                 </View>
