@@ -15,7 +15,7 @@ let TARGET_SAMPLE_RATE = 48000.0
 @_silgen_name("fvad_free") private func fvad_free(_ inst: OpaquePointer?)
 
 private let VAD_FRAME_MS = 20
-private let SPEECH_TRIGGER_FRAMES = 3
+private let SPEECH_TRIGGER_FRAMES = 15  // 300ms / 20ms：最小语音时长，过滤喷嚏等瞬态
 private let SILENCE_END_FRAMES = 40   // 800ms / 20ms
 
 // 能量门控 + 自适应底噪参数（RMS 幅度域）
@@ -25,6 +25,7 @@ private let FLOOR_ALPHA_UP: Float = 0.05  // 底噪上升（慢）
 private let FLOOR_INIT: Float = 0.25      // 冷启动保守初值
 private let FLOOR_CAP: Float = 8.0        // 能量上限保护：瞬态不更新底噪
 private let FLOOR_MIN: Float = 1e-6       // 底噪下限
+private let RECALIB_WINDOW_FRAMES = 250  // 5s / 20ms：floor 重校准窗口
 
 public class MicrophoneStreamModule: Module {
 
@@ -42,6 +43,8 @@ public class MicrophoneStreamModule: Module {
   private var preRoll: [Float] = []
   private var preRollCapacity = 0
   private var noiseFloor: Float = FLOOR_INIT
+  private var recalibMin: Float = Float.greatestFiniteMagnitude
+  private var recalibCounter = 0
   private var graceFramesRemaining = 0
 
   // Each module class must implement the definition function. The definition consists of components
@@ -224,11 +227,18 @@ public class MicrophoneStreamModule: Module {
     return (sum / Float(samples.count)).squareRoot()
   }
 
+  // floor 只降不升 + 窗口满重校准（用窗口最低值，允许 floor 上升跟上环境变吵）
   private func updateNoiseFloor(_ floor: Float, rms: Float) -> Float {
-    if rms > floor * FLOOR_CAP { return floor } // 关门等瞬态不更新底噪
-    let alpha = rms < floor ? FLOOR_ALPHA_DOWN : FLOOR_ALPHA_UP
-    let next = (1 - alpha) * floor + alpha * rms
-    return max(next, FLOOR_MIN)
+    let newFloor = max(min(floor, rms), FLOOR_MIN)
+    recalibMin = min(recalibMin, rms)
+    recalibCounter += 1
+    if recalibCounter >= RECALIB_WINDOW_FRAMES {
+      let recalibrated = max(newFloor, recalibMin)
+      recalibMin = Float.greatestFiniteMagnitude
+      recalibCounter = 0
+      return recalibrated
+    }
+    return newFloor
   }
 
   private func updateVadState(isSpeech: Bool) {
