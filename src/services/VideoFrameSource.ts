@@ -30,6 +30,7 @@ export class VideoFrameSource {
   private running = false
   private busy: boolean = false
   private frameCallback: ((base64Jpg: string) => void) | null = null
+  private changeCallback: (() => void) | null = null
 
   setCameraRef(ref: RefObject<CameraView>): void {
     this.cameraRef = ref
@@ -37,6 +38,10 @@ export class VideoFrameSource {
 
   setFrameCallback(cb: (base64Jpg: string) => void): void {
     this.frameCallback = cb
+  }
+
+  setChangeCallback(cb: () => void): void {
+    this.changeCallback = cb
   }
 
   start(mode: "onDemand" | "continuous"): void {
@@ -110,6 +115,10 @@ export class VideoFrameSource {
       const changed =
         this.lastThumbBase64 !== null &&
         diffRatio(thumbBase64, this.lastThumbBase64) >= ADAPTIVE_DEFAULTS.changeThreshold
+      const isMutation = changed && !this.frameState.wasChanged
+      if (isMutation) {
+        this.changeCallback?.()
+      }
       this.lastThumbBase64 = thumbBase64
 
       this.frameState = nextFrameState(
