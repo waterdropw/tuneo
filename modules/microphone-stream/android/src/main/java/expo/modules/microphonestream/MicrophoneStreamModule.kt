@@ -32,7 +32,7 @@ class MicrophoneStreamModule : Module() {
 
     @Volatile private var vadHandle = 0L
     private val vadFrameMs = 20
-    private val speechTriggerFrames = 3
+    private val speechTriggerFrames = 15 // 300ms / 20ms：最小语音时长，过滤喷嚏等瞬态
     private val silenceEndFrames = 40
     // 能量门控 + 自适应底噪参数（RMS 幅度域，与 iOS/TS 参考一致）
     private val snrK = 4.0f          // 12dB：rms >= floor × 4 才喂 libfvad
@@ -41,6 +41,7 @@ class MicrophoneStreamModule : Module() {
     private val floorInit = 0.25f     // 冷启动保守初值
     private val floorCap = 8.0f       // 能量上限保护：瞬态不更新底噪
     private val floorMin = 1e-6f      // 底噪下限
+    private val recalibWindowFrames = 250 // 5s / 20ms：floor 重校准窗口
     private var speechActive = false
     private var justStartedSpeech = false
     private var speechStreak = 0
@@ -48,6 +49,8 @@ class MicrophoneStreamModule : Module() {
     private val preRoll = ArrayDeque<Short>()
     private var preRollCapacity = 0
     private var noiseFloor = floorInit
+    private var recalibMin = Float.MAX_VALUE
+    private var recalibCounter = 0
     private var graceFramesRemaining = 0
 
     init {
@@ -200,11 +203,18 @@ class MicrophoneStreamModule : Module() {
         return kotlin.math.sqrt(sum / frame.size).toFloat()
     }
 
+    // floor 只降不升 + 窗口满重校准（用窗口最低值，允许 floor 上升跟上环境变吵）
     private fun updateNoiseFloor(floor: Float, rms: Float): Float {
-        if (rms > floor * floorCap) return floor // 关门等瞬态不更新底噪
-        val alpha = if (rms < floor) floorAlphaDown else floorAlphaUp
-        val next = (1 - alpha) * floor + alpha * rms
-        return maxOf(next, floorMin)
+        val newFloor = maxOf(minOf(floor, rms), floorMin)
+        recalibMin = minOf(recalibMin, rms)
+        recalibCounter++
+        if (recalibCounter >= recalibWindowFrames) {
+            val recalibrated = maxOf(newFloor, recalibMin)
+            recalibMin = Float.MAX_VALUE
+            recalibCounter = 0
+            return recalibrated
+        }
+        return newFloor
     }
 
     private fun updateVadState(isSpeech: Boolean) {
