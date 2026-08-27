@@ -210,7 +210,8 @@ public class MicrophoneStreamModule: Module {
           // libfvad 判 silence 才更新底噪（含能量上限保护）
           noiseFloor = updateNoiseFloor(noiseFloor, rms: rms)
         }
-        updateVadState(isSpeech: isSpeech)
+        // 宽限期内抑制 speech 触发：floor 照常收敛，但不触发 onSpeechStart
+        updateVadState(isSpeech: inGrace ? false : isSpeech)
       }
       offset += frameLen
     }
