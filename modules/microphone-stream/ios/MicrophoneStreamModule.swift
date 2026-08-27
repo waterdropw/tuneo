@@ -18,6 +18,14 @@ private let VAD_FRAME_MS = 20
 private let SPEECH_TRIGGER_FRAMES = 3
 private let SILENCE_END_FRAMES = 40   // 800ms / 20ms
 
+// 能量门控 + 自适应底噪参数（RMS 幅度域）
+private let SNR_K: Float = 4.0          // 12dB：rms >= floor × 4 才喂 libfvad
+private let FLOOR_ALPHA_DOWN: Float = 0.2 // 底噪下探（快）
+private let FLOOR_ALPHA_UP: Float = 0.05  // 底噪上升（慢）
+private let FLOOR_INIT: Float = 0.25      // 冷启动保守初值
+private let FLOOR_CAP: Float = 8.0        // 能量上限保护：瞬态不更新底噪
+private let FLOOR_MIN: Float = 1e-6       // 底噪下限
+
 public class MicrophoneStreamModule: Module {
 
   private let audioSession = AVAudioSession.sharedInstance()
@@ -33,6 +41,7 @@ public class MicrophoneStreamModule: Module {
   private var silenceStreak = 0
   private var preRoll: [Float] = []
   private var preRollCapacity = 0
+  private var noiseFloor: Float = FLOOR_INIT
 
   // Each module class must implement the definition function. The definition consists of components
   // that describes the module's functionality and behavior.
@@ -146,6 +155,7 @@ public class MicrophoneStreamModule: Module {
     speechActive = false
     speechStreak = 0
     silenceStreak = 0
+    noiseFloor = FLOOR_INIT
   }
 
   private func initVad() {
@@ -168,24 +178,50 @@ public class MicrophoneStreamModule: Module {
     print("[vad] initialized at \(sampleRateForVad)Hz, preRollCapacity=\(preRollCapacity)")
   }
 
-  // 将一段 Float 样本切帧喂 VAD，内部按帧更新 speech 状态
+  // 将一段 Float 样本切帧喂 VAD；先做能量门控粗筛，再交给 libfvad 精判
   private func processVadFrames(_ samples: [Float]) {
     guard let v = vad else { return }
     let frameLen = sampleRateForVad * VAD_FRAME_MS / 1000
     var offset = 0
     while offset + frameLen <= samples.count {
-      // libfvad 的 fvad_process 需要 Int16 PCM，而 tap 给出的是 Float(-1...1)，
-      // 先 clamp 再转 Int16，避免越界崩溃。
-      let frameInt16: [Int16] = samples[offset..<(offset + frameLen)].map { sample in
-        let clamped = max(-1.0, min(1.0, sample))
-        return Int16(clamped * 32767.0)
+      let frame = Array(samples[offset..<(offset + frameLen)])
+      let rms = computeRms(frame)
+
+      if rms < noiseFloor * SNR_K {
+        // 能量门控：低能量直接判 silence，跳过 libfvad，并下探底噪
+        noiseFloor = updateNoiseFloor(noiseFloor, rms: rms)
+        updateVadState(isSpeech: false)
+      } else {
+        // libfvad 的 fvad_process 需要 Int16 PCM，先 clamp 再转 Int16
+        let frameInt16: [Int16] = frame.map { sample in
+          let clamped = max(-1.0, min(1.0, sample))
+          return Int16(clamped * 32767.0)
+        }
+        let isSpeech = frameInt16.withUnsafeBufferPointer { buf in
+          fvad_process(v, buf.baseAddress, frameLen) == 1
+        }
+        if !isSpeech {
+          // libfvad 判 silence 才更新底噪（含能量上限保护）
+          noiseFloor = updateNoiseFloor(noiseFloor, rms: rms)
+        }
+        updateVadState(isSpeech: isSpeech)
       }
-      let isSpeech = frameInt16.withUnsafeBufferPointer { buf in
-        fvad_process(v, buf.baseAddress, frameLen) == 1
-      }
-      updateVadState(isSpeech: isSpeech)
       offset += frameLen
     }
+  }
+
+  private func computeRms(_ samples: [Float]) -> Float {
+    guard !samples.isEmpty else { return 0 }
+    var sum: Float = 0
+    for x in samples { sum += x * x }
+    return (sum / Float(samples.count)).squareRoot()
+  }
+
+  private func updateNoiseFloor(_ floor: Float, rms: Float) -> Float {
+    if rms > floor * FLOOR_CAP { return floor } // 关门等瞬态不更新底噪
+    let alpha = rms < floor ? FLOOR_ALPHA_DOWN : FLOOR_ALPHA_UP
+    let next = (1 - alpha) * floor + alpha * rms
+    return max(next, FLOOR_MIN)
   }
 
   private func updateVadState(isSpeech: Bool) {
