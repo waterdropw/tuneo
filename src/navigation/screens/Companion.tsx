@@ -141,6 +141,7 @@ export const Companion = () => {
   const audioSentRef = useRef(0)
   const imageSentRef = useRef(0)
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const proactiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -200,6 +201,7 @@ export const Companion = () => {
       clearTimeout(rebuildTimerRef.current)
       rebuildTimerRef.current = null
     }
+    stopProactive()
     audioSourceRef.current?.stopProcessing()
     audioSourceRef.current = null
     playerRef.current?.stop()
@@ -230,10 +232,35 @@ export const Companion = () => {
     }, 30000)
   }
 
+  // 10s 定时主动触发：静默聆听中让模型看当前画面，判断是否提醒（阶段一）
+  const startProactive = () => {
+    stopProactive()
+    proactiveTimerRef.current = setInterval(() => {
+      if (statusRef.current === "listening") {
+        try {
+          serviceRef.current?.createResponse()
+        } catch (e) {
+          console.warn("[companion] proactive createResponse failed", e)
+        }
+        armRebuild()
+      }
+    }, 10000)
+  }
+
+  const stopProactive = () => {
+    if (proactiveTimerRef.current) {
+      clearInterval(proactiveTimerRef.current)
+      proactiveTimerRef.current = null
+    }
+  }
+
   const handleEvent = (event: OmniEvent, data?: any) => {
     switch (event) {
       case "session-updated":
         Vibration.vibrate(80)
+        if (videoMode !== "off") {
+          startProactive()
+        }
         setStatus("listening")
         statusRef.current = "listening"
         break
@@ -414,6 +441,7 @@ export const Companion = () => {
 
   useEffect(() => {
     return () => {
+      stopProactive()
       audioSourceRef.current?.stopProcessing()
       playerRef.current?.stop()
       videoSourceRef.current?.stop()
