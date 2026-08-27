@@ -183,9 +183,6 @@ public class MicrophoneStreamModule: Module {
       let isSpeech = frameInt16.withUnsafeBufferPointer { buf in
         fvad_process(v, buf.baseAddress, frameLen) == 1
       }
-      if isSpeech {
-        print("[vad] frame=speech")
-      }
       updateVadState(isSpeech: isSpeech)
       offset += frameLen
     }
