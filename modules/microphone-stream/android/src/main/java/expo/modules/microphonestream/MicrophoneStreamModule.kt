@@ -34,12 +34,21 @@ class MicrophoneStreamModule : Module() {
     private val vadFrameMs = 20
     private val speechTriggerFrames = 3
     private val silenceEndFrames = 40
+    // 能量门控 + 自适应底噪参数（RMS 幅度域，与 iOS/TS 参考一致）
+    private val snrK = 4.0f          // 12dB：rms >= floor × 4 才喂 libfvad
+    private val floorAlphaDown = 0.2f // 底噪下探（快）
+    private val floorAlphaUp = 0.05f  // 底噪上升（慢）
+    private val floorInit = 0.25f     // 冷启动保守初值
+    private val floorCap = 8.0f       // 能量上限保护：瞬态不更新底噪
+    private val floorMin = 1e-6f      // 底噪下限
     private var speechActive = false
     private var justStartedSpeech = false
     private var speechStreak = 0
     private var silenceStreak = 0
     private val preRoll = ArrayDeque<Short>()
     private var preRollCapacity = 0
+    private var noiseFloor = floorInit
+    private var graceFramesRemaining = 0
 
     init {
         try {
@@ -120,7 +129,24 @@ class MicrophoneStreamModule : Module() {
                         var offset = 0
                         while (offset + frameLen <= read) {
                             val frame = buffer.copyOfRange(offset, offset + frameLen)
-                            updateVadState(nativeVadProcess(vadHandle, frame, frameLen) == 1)
+                            val rms = computeRms(frame)
+
+                            val inGrace = graceFramesRemaining > 0
+                            if (inGrace) { graceFramesRemaining -= 1 }
+
+                            if (!inGrace && rms < noiseFloor * snrK) {
+                                // 能量门控：低能量直接判 silence，跳过 libfvad，并更新底噪（快降/慢升）
+                                noiseFloor = updateNoiseFloor(noiseFloor, rms)
+                                updateVadState(false)
+                            } else {
+                                // 冷启动宽限期内，或能量够高：直喂 libfvad 精判
+                                val isSpeech = nativeVadProcess(vadHandle, frame, frameLen) == 1
+                                if (!isSpeech) {
+                                    // libfvad 判 silence 才更新底噪（含能量上限保护）
+                                    noiseFloor = updateNoiseFloor(noiseFloor, rms)
+                                }
+                                updateVadState(isSpeech)
+                            }
                             offset += frameLen
                         }
 
@@ -153,11 +179,31 @@ class MicrophoneStreamModule : Module() {
         speechActive = false
         speechStreak = 0
         silenceStreak = 0
+        noiseFloor = floorInit
     }
 
     private fun initVad() {
         vadHandle = nativeVadCreate(sampleRate, 2)
         preRollCapacity = sampleRate * 300 / 1000
+        graceFramesRemaining = 25 // 500ms / 20ms：冷启动宽限期，直喂 libfvad 收敛底噪
+    }
+
+    // Short PCM 归一化为 Float 后算 RMS（幅度域，与 iOS/TS 参考一致）
+    private fun computeRms(frame: ShortArray): Float {
+        if (frame.isEmpty()) return 0f
+        var sum = 0.0
+        for (s in frame) {
+            val x = s / 32768.0f
+            sum += (x * x).toDouble()
+        }
+        return kotlin.math.sqrt(sum / frame.size).toFloat()
+    }
+
+    private fun updateNoiseFloor(floor: Float, rms: Float): Float {
+        if (rms > floor * floorCap) return floor // 关门等瞬态不更新底噪
+        val alpha = if (rms < floor) floorAlphaDown else floorAlphaUp
+        val next = (1 - alpha) * floor + alpha * rms
+        return maxOf(next, floorMin)
     }
 
     private fun updateVadState(isSpeech: Boolean) {
