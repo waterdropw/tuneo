@@ -143,6 +143,7 @@ export const Companion = () => {
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const proactiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastInteractionRef = useRef<number>(0)
+  const userSpeakingRef = useRef<boolean>(false)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -237,7 +238,11 @@ export const Companion = () => {
   const startProactive = () => {
     stopProactive()
     proactiveTimerRef.current = setInterval(() => {
-      if (statusRef.current === "listening" && Date.now() - lastInteractionRef.current > 10000) {
+      if (
+        statusRef.current === "listening" &&
+        !userSpeakingRef.current &&
+        Date.now() - lastInteractionRef.current > 10000
+      ) {
         try {
           serviceRef.current?.createResponse()
         } catch (e) {
@@ -320,6 +325,8 @@ export const Companion = () => {
     setErrorMsg("")
     audioSentRef.current = 0
     imageSentRef.current = 0
+    lastInteractionRef.current = 0
+    userSpeakingRef.current = false
     setSentStats({ audio: 0, image: 0 })
     setStatus("connecting")
     statusRef.current = "connecting"
@@ -369,6 +376,7 @@ export const Companion = () => {
       audioSource.setSpeechCallbacks(
         () => {
           // 孩子开口：打断进行中的回复，并取消静音重建定时器
+          userSpeakingRef.current = true
           if (rebuildTimerRef.current) {
             clearTimeout(rebuildTimerRef.current)
             rebuildTimerRef.current = null
@@ -381,6 +389,7 @@ export const Companion = () => {
         },
         () => {
           // 人声结束：重新武装 30s 静音重建定时器，再提交并触发回复
+          userSpeakingRef.current = false
           lastInteractionRef.current = Date.now()
           armRebuild()
           try {
@@ -419,7 +428,11 @@ export const Companion = () => {
           }
         })
         videoSource.setChangeCallback(() => {
-          if (statusRef.current === "listening" && Date.now() - lastInteractionRef.current > 10000) {
+          if (
+            statusRef.current === "listening" &&
+            !userSpeakingRef.current &&
+            Date.now() - lastInteractionRef.current > 10000
+          ) {
             try {
               service.createResponse()
             } catch (e) {
