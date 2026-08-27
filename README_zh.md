@@ -122,6 +122,7 @@
   - 危险检测的完整链条：① 检测「有东西在动」→ ② 识别「是汽车/电动车/人」→ ③ 定位「在马路上？朝哪去？是否逼近」→ ④ 判断「危险吗」→ ⑤ 响应提醒。**光流只覆盖第①环**（运动检测），且帧间差分即可粗略替代，**不是危险检测的答案**。
   - 真正的技术路径：**目标检测模型**（识别汽车/电动车/人，如 YOLO 等）+ **深度估计**（判断距离/是否逼近）+ **真视频流 + 原生推理**（Vision framework 或移动端检测模型）。三者结合才能把「检测到快速移动物体」升级为「判断危险」。
   - 硬约束：检测高速物体需要高帧率视频流（15–30fps），当前 `expo-camera` 只能 1s 拍照，既无视频流、无像素访问、无原生计算——三样都缺。这是独立于「自适应帧率」的另一个量级工程。
+  - **端侧检测现成方案调研（2026）**：需先换 VisionCamera v5（frame processor 拿真视频流），再叠加端侧推理库。目标检测：ExecuTorch `useObjectDetection`（YOLO/RF-DETR，COCO 80 类含 car/person/motorcycle/bicycle 等交通类）或 `vision-camera-plugin-object-detector`（ML Kit，粗分类）；场景分类：ExecuTorch `useClassification`（CLIP/EfficientNet）。硬前提：VisionCamera v5 是 2026 年 4 月 Nitro 架构重写，需 RN New Arch + prebuild（非 Expo Go）+ nitro-modules/worklets 等 peer 依赖；且检测只给出「有什么物体在哪」，距离/是否逼近/是否危险仍需深度估计或轨迹判断；功耗（15-30fps 端侧推理）仍是挂脖硬件的实打实约束。
 - [ ] **儿童数据合规**：API Key 打进客户端包（`EXPO_PUBLIC_DASHSCOPE_API_KEY`），任何反编译者都能白嫖额度；每日对话落盘本地，但无家长授权体系、无数据留存策略、无删除权，撞 COPPA / GDPR-K / 国内《儿童个人信息网络保护规定》；儿童声纹长期上传云端属最敏感一类。
 - [ ] **服务端缺失**：当前客户端直连阿里云百炼，无自有服务端做 API Key 托管、内容安全二次审核、用量计费、设备鉴权、家长端数据同步。这一步是「demo → 产品」的分水岭。
 
