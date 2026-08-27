@@ -142,6 +142,7 @@ export const Companion = () => {
   const imageSentRef = useRef(0)
   const rebuildTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const proactiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastInteractionRef = useRef<number>(0)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -236,12 +237,13 @@ export const Companion = () => {
   const startProactive = () => {
     stopProactive()
     proactiveTimerRef.current = setInterval(() => {
-      if (statusRef.current === "listening") {
+      if (statusRef.current === "listening" && Date.now() - lastInteractionRef.current > 10000) {
         try {
           serviceRef.current?.createResponse()
         } catch (e) {
           console.warn("[companion] proactive createResponse failed", e)
         }
+        lastInteractionRef.current = Date.now()
         armRebuild()
       }
     }, 10000)
@@ -379,6 +381,7 @@ export const Companion = () => {
         },
         () => {
           // 人声结束：重新武装 30s 静音重建定时器，再提交并触发回复
+          lastInteractionRef.current = Date.now()
           armRebuild()
           try {
             service.commitAudioBuffer()
@@ -413,6 +416,17 @@ export const Companion = () => {
             } catch (e) {
               console.warn("[companion] appendImage failed", e)
             }
+          }
+        })
+        videoSource.setChangeCallback(() => {
+          if (statusRef.current === "listening" && Date.now() - lastInteractionRef.current > 10000) {
+            try {
+              service.createResponse()
+            } catch (e) {
+              console.warn("[companion] mutation createResponse failed", e)
+            }
+            lastInteractionRef.current = Date.now()
+            armRebuild()
           }
         })
         videoSource.start(videoMode)
