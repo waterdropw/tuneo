@@ -477,17 +477,6 @@ export const Companion = () => {
             </View>
           ))}
 
-        {videoMode === "onDemand" && isRunning && cameraPermission?.granted && (
-          <TouchableOpacity
-            style={styles.captureButton}
-            onPress={() => {
-              setMessages((prev) => [...prev, { role: "user", text: "[图片]", ts: Date.now() }])
-              videoSourceRef.current?.captureFrame()
-            }}
-          >
-            <Text style={styles.buttonText}>看这个</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       {/* TODO(dev): 发版前移除 —— Prompt 调试区块（下面整个 section） */}
@@ -649,13 +638,6 @@ const styles = StyleSheet.create({
   cameraPlaceholderText: {
     color: Colors.secondary,
     fontSize: 14,
-  },
-  captureButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 10,
   },
   button: {
     paddingVertical: 14,

@@ -16,8 +16,8 @@ export function fitsSizeLimit(base64: string, maxBytes: number = MAX_FRAME_BYTES
 }
 
 const CONTINUOUS_INTERVAL_MS = 1000
-const TARGET_WIDTH = 1280
-const FALLBACK_WIDTH = 960
+const ON_DEMAND_INTERVAL_MS = 5000
+const TARGET_WIDTH = 320
 
 export class VideoFrameSource {
   private cameraRef: RefObject<CameraView> | null = null
@@ -35,11 +35,10 @@ export class VideoFrameSource {
 
   start(mode: "onDemand" | "continuous"): void {
     this.stop()
-    if (mode === "continuous") {
-      this.timer = setInterval(() => {
-        this.captureFrame()
-      }, CONTINUOUS_INTERVAL_MS)
-    }
+    const interval = mode === "continuous" ? CONTINUOUS_INTERVAL_MS : ON_DEMAND_INTERVAL_MS
+    this.timer = setInterval(() => {
+      this.captureFrame()
+    }, interval)
   }
 
   stop(): void {
@@ -63,21 +62,12 @@ export class VideoFrameSource {
       }
       uris.push(photo.uri)
 
-      let result = await manipulateAsync(
+      const result = await manipulateAsync(
         photo.uri,
         [{ resize: { width: TARGET_WIDTH } }],
         { compress: 0.7, format: SaveFormat.JPEG, base64: true }
       )
       uris.push(result.uri)
-
-      if (!result.base64 || !fitsSizeLimit(result.base64)) {
-        result = await manipulateAsync(
-          photo.uri,
-          [{ resize: { width: FALLBACK_WIDTH } }],
-          { compress: 0.5, format: SaveFormat.JPEG, base64: true }
-        )
-        uris.push(result.uri)
-      }
 
       if (result.base64 && fitsSizeLimit(result.base64)) {
         this.frameCallback?.(result.base64)
