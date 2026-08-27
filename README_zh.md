@@ -123,6 +123,7 @@
   - 真正的技术路径：**目标检测模型**（识别汽车/电动车/人，如 YOLO 等）+ **深度估计**（判断距离/是否逼近）+ **真视频流 + 原生推理**（Vision framework 或移动端检测模型）。三者结合才能把「检测到快速移动物体」升级为「判断危险」。
   - 硬约束：检测高速物体需要高帧率视频流（15–30fps），当前 `expo-camera` 只能 1s 拍照，既无视频流、无像素访问、无原生计算——三样都缺。这是独立于「自适应帧率」的另一个量级工程。
   - **端侧检测现成方案调研（2026）**：需先换 VisionCamera v5（frame processor 拿真视频流），再叠加端侧推理库。目标检测：ExecuTorch `useObjectDetection`（YOLO/RF-DETR，COCO 80 类含 car/person/motorcycle/bicycle 等交通类）或 `vision-camera-plugin-object-detector`（ML Kit，粗分类）；场景分类：ExecuTorch `useClassification`（CLIP/EfficientNet）。硬前提：VisionCamera v5 是 2026 年 4 月 Nitro 架构重写，需 RN New Arch + prebuild（非 Expo Go）+ nitro-modules/worklets 等 peer 依赖；且检测只给出「有什么物体在哪」，距离/是否逼近/是否危险仍需深度估计或轨迹判断；功耗（15-30fps 端侧推理）仍是挂脖硬件的实打实约束。
+  - **架构性矛盾（危险预警 vs 端侧 VAD 接管）**：当前「端侧 VAD 完全接管」架构下，`turn_detection: null`，模型生成回复的唯一触发点是 `createResponse()`，且**只在 `onSpeechEnd`（孩子说完话）时调用**。因此**只发图片、孩子不说话时，模型完全静默**——prompt 里「周围有危险就提醒」这条指令在这种架构下根本无法生效。危险预警主场景恰恰需要「不说话时模型主动提醒」，与「语音轮次驱动」的模型直接冲突。解决方向：突破单一语音触发，改为**多事件驱动**（语音 + 图像/端侧检测事件都能触发 `createResponse`）。这是比「光流/目标检测选型」更底层的设计冲突，必须先定架构再谈选型。
 - [ ] **儿童数据合规**：API Key 打进客户端包（`EXPO_PUBLIC_DASHSCOPE_API_KEY`），任何反编译者都能白嫖额度；每日对话落盘本地，但无家长授权体系、无数据留存策略、无删除权，撞 COPPA / GDPR-K / 国内《儿童个人信息网络保护规定》；儿童声纹长期上传云端属最敏感一类。
 - [ ] **服务端缺失**：当前客户端直连阿里云百炼，无自有服务端做 API Key 托管、内容安全二次审核、用量计费、设备鉴权、家长端数据同步。这一步是「demo → 产品」的分水岭。
 
