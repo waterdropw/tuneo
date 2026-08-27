@@ -7,6 +7,7 @@ import type { RefObject } from "react"
 import { CameraView } from "expo-camera"
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator"
 import * as FileSystem from "expo-file-system"
+import { nextFrameState, diffRatio, ADAPTIVE_DEFAULTS, FrameState } from "./adaptiveFramerate"
 
 export const MAX_FRAME_BYTES = 256 * 1024
 
@@ -18,10 +19,15 @@ export function fitsSizeLimit(base64: string, maxBytes: number = MAX_FRAME_BYTES
 const CONTINUOUS_INTERVAL_MS = 1000
 const ON_DEMAND_INTERVAL_MS = 5000
 const TARGET_WIDTH = 320
+const THUMB_SIZE = 16
 
 export class VideoFrameSource {
   private cameraRef: RefObject<CameraView> | null = null
-  private timer: ReturnType<typeof setInterval> | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private baseInterval = 0
+  private frameState: FrameState = { interval: 0, wasChanged: false }
+  private lastThumbBase64: string | null = null
+  private running = false
   private busy: boolean = false
   private frameCallback: ((base64Jpg: string) => void) | null = null
 
@@ -35,18 +41,27 @@ export class VideoFrameSource {
 
   start(mode: "onDemand" | "continuous"): void {
     this.stop()
-    const interval = mode === "continuous" ? CONTINUOUS_INTERVAL_MS : ON_DEMAND_INTERVAL_MS
-    this.timer = setInterval(() => {
-      this.captureFrame()
-    }, interval)
+    this.baseInterval = mode === "continuous" ? CONTINUOUS_INTERVAL_MS : ON_DEMAND_INTERVAL_MS
+    this.frameState = { interval: this.baseInterval, wasChanged: false }
+    this.lastThumbBase64 = null
+    this.running = true
+    this.scheduleNext()
   }
 
   stop(): void {
+    this.running = false
     if (this.timer) {
-      clearInterval(this.timer)
+      clearTimeout(this.timer)
       this.timer = null
     }
     this.busy = false
+  }
+
+  private scheduleNext(): void {
+    if (!this.running) return
+    this.timer = setTimeout(() => {
+      this.captureFrame()
+    }, this.frameState.interval)
   }
 
   async captureFrame(): Promise<void> {
@@ -62,18 +77,45 @@ export class VideoFrameSource {
       }
       uris.push(photo.uri)
 
-      const result = await manipulateAsync(
+      // 发送帧：320 宽 JPEG
+      const sendResult = await manipulateAsync(
         photo.uri,
         [{ resize: { width: TARGET_WIDTH } }],
         { compress: 0.7, format: SaveFormat.JPEG, base64: true }
       )
-      uris.push(result.uri)
+      uris.push(sendResult.uri)
 
-      if (result.base64 && fitsSizeLimit(result.base64)) {
-        this.frameCallback?.(result.base64)
+      if (sendResult.base64 && fitsSizeLimit(sendResult.base64)) {
+        this.frameCallback?.(sendResult.base64)
       } else {
         console.warn("[video-frame] Frame exceeds size limit, dropped")
       }
+
+      // 检测帧：16×16 无损 PNG（仅用于画面变化检测，不发模型）
+      const thumbResult = await manipulateAsync(
+        photo.uri,
+        [{ resize: { width: THUMB_SIZE, height: THUMB_SIZE } }],
+        { format: SaveFormat.PNG, base64: true }
+      )
+      uris.push(thumbResult.uri)
+
+      // 更新状态机
+      const thumbBase64 = thumbResult.base64 ?? ""
+      const changed =
+        this.lastThumbBase64 !== null &&
+        diffRatio(thumbBase64, this.lastThumbBase64) >= ADAPTIVE_DEFAULTS.changeThreshold
+      this.lastThumbBase64 = thumbBase64
+
+      this.frameState = nextFrameState(
+        this.frameState,
+        this.baseInterval,
+        changed,
+        {
+          accelFactor: ADAPTIVE_DEFAULTS.accelFactor,
+          minInterval: ADAPTIVE_DEFAULTS.minInterval,
+          decayFactor: ADAPTIVE_DEFAULTS.decayFactor,
+        }
+      )
     } catch (e) {
       console.warn("[video-frame] capture failed", e)
     } finally {
@@ -81,6 +123,7 @@ export class VideoFrameSource {
         FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {})
       }
       this.busy = false
+      this.scheduleNext()
     }
   }
 }
