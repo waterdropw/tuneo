@@ -2,6 +2,8 @@ import AVFoundation
 import ExpoModulesCore
 
 let BUF_PER_SEC = 10
+// tap 输出统一重采样到 48kHz（libfvad 仅支持 8/16/32/48k；模拟器硬件为 44.1k 会绕过 VAD）
+let TARGET_SAMPLE_RATE = 48000.0
 
 // libfvad C 接口声明（Task 2 已在 app target 的 bridging header 导入 fvad.h，
 // 但本文件编译进独立的 MicrophoneStream pod target，看不到 app 的 bridging header，
@@ -66,10 +68,16 @@ public class MicrophoneStreamModule: Module {
                   try self.audioSession.setActive(true)
 
                   let inputNode = self.audioEngine.inputNode
-                  let hwFormat = inputNode.inputFormat(forBus: 0)
-                  let bufferSize = AVAudioFrameCount(self.audioSession.sampleRate / Double(BUF_PER_SEC))
+                  // 显式指定 48kHz 单声道浮点格式，AVAudioEngine 会自动把硬件采样率重采样过来
+                  let targetFormat = AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32,
+                    sampleRate: TARGET_SAMPLE_RATE,
+                    channels: 1,
+                    interleaved: false
+                  )!
+                  let bufferSize = AVAudioFrameCount(TARGET_SAMPLE_RATE / Double(BUF_PER_SEC))
 
-                  inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: hwFormat) { buffer, _ in
+                  inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { buffer, _ in
                       guard let channelData = buffer.floatChannelData else { return }
                       let frameLength = Int(buffer.frameLength)
                       let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
@@ -102,8 +110,8 @@ public class MicrophoneStreamModule: Module {
                       }
                   }
 
-                  // 以实际硬件采样率为准初始化 VAD（真机为 48kHz，frameLen=960）
-                  self.sampleRateForVad = Int(hwFormat.sampleRate.rounded())
+                  // tap 输出已统一为 48kHz，VAD 始终以 48k 初始化（frameLen=960）
+                  self.sampleRateForVad = Int(TARGET_SAMPLE_RATE)
                   self.initVad()
 
                   try self.audioEngine.start()
@@ -119,8 +127,8 @@ public class MicrophoneStreamModule: Module {
     }
 
     Function("getSampleRate") { () -> Double in
-      // Requires initializing inputNode before retrieving sampleRate
-      return self.audioEngine.inputNode.inputFormat(forBus: 0).sampleRate
+      // tap 输出已统一重采样到 48kHz，返回该值供 JS 端重采样到 16k 使用
+      return TARGET_SAMPLE_RATE
     }
   }
 
