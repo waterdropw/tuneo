@@ -184,6 +184,8 @@ class MicrophoneStreamModule : Module() {
         speechStreak = 0
         silenceStreak = 0
         noiseFloor = floorInit
+        recalibMin = Float.MAX_VALUE
+        recalibCounter = 0
     }
 
     private fun initVad() {

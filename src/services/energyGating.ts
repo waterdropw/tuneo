@@ -6,12 +6,13 @@
 export const ENERGY_GATING = {
   // 12dB 门控阈值：rms >= floor × snrK 才喂 libfvad
   snrK: 4.0,
-  // 底噪指数平滑系数：下降快、上升慢
+  // @deprecated 底噪指数平滑系数：下降快、上升慢（仅旧 updateNoiseFloor 使用，floor 现为 minimum tracking）
   alphaDown: 0.2,
+  // @deprecated 底噪指数平滑系数：下降快、上升慢（仅旧 updateNoiseFloor 使用，floor 现为 minimum tracking）
   alphaUp: 0.05,
   // 冷启动保守初值（满幅 RMS 约 1.0 的 1/4）
   floorInit: 0.25,
-  // 能量上限保护：rms > floor × cap 的帧（关门等瞬态）不更新底噪
+  // @deprecated 能量上限保护：rms > floor × cap 的帧（关门等瞬态）不更新底噪（仅旧 updateNoiseFloor 使用）
   cap: 8.0,
   // 底噪下限，防止收敛到 0
   min: 1e-6,
@@ -33,7 +34,12 @@ export function shouldGateByEnergy(rms: number, floor: number, k: number): boole
   return rms < floor * k
 }
 
-// 底噪更新：仅在判 silence（门控判 silence 或 libfvad 判 silence）时调用；能量超上限（瞬态）则不更新
+/**
+ * 底噪更新：仅在判 silence（门控判 silence 或 libfvad 判 silence）时调用；能量超上限（瞬态）则不更新。
+ *
+ * @deprecated floor 更新现为 minimum tracking（只降 + 窗口重校准），见 ./floorTracking.ts。
+ * 本双向平滑函数仅保留给旧断言使用，已不再是 floor 的权威参考实现。
+ */
 export function updateNoiseFloor(
   floor: number,
   rms: number,

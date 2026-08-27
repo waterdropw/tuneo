@@ -160,6 +160,8 @@ public class MicrophoneStreamModule: Module {
     speechStreak = 0
     silenceStreak = 0
     noiseFloor = FLOOR_INIT
+    recalibMin = Float.greatestFiniteMagnitude
+    recalibCounter = 0
   }
 
   private func initVad() {
