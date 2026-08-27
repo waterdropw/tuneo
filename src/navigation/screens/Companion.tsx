@@ -26,6 +26,7 @@ import {
   VideoMode,
 } from "@/stores/companionStore"
 import { MenuAction } from "@react-native-menu/menu"
+import { Ionicons } from "@expo/vector-icons"
 import { localStorage } from "@/stores/localStorage"
 
 type MicrophoneAccess = "pending" | "granted" | "denied"
@@ -45,6 +46,18 @@ const VIDEO_MODE_TITLES: Record<VideoMode, string> = {
 
 type ChatMessage = { role: "user" | "assistant"; text: string; ts: number }
 const HISTORY_KEY = "companion-chat-history"
+
+function avatarIcon(role: "user" | "assistant", ageMode: AgeMode): keyof typeof Ionicons.glyphMap {
+  if (role === "user") return "person"
+  switch (ageMode) {
+    case "toddler":
+      return "balloon"
+    case "child":
+      return "happy"
+    case "auto":
+      return "sparkles"
+  }
+}
 
 function dayKey(ts: number): string {
   const d = new Date(ts || Date.now())
@@ -545,22 +558,29 @@ export const Companion = () => {
           ) : (
             messages.slice(Math.max(0, messages.length - visibleCount)).map((m, i) => {
               const idx = Math.max(0, messages.length - visibleCount) + i
+              const isUser = m.role === "user"
               return (
                 <View
                   key={idx}
-                  style={[
-                    styles.chatBubble,
-                    m.role === "user" ? styles.userBubble : styles.assistantBubble,
-                  ]}
+                  style={[styles.messageRow, isUser ? styles.userRow : styles.assistantRow]}
                 >
-                  <Text
-                    style={[
-                      styles.chatText,
-                      m.role === "user" ? styles.userChatText : styles.assistantChatText,
-                    ]}
-                  >
-                    {m.text}
-                  </Text>
+                  {!isUser && (
+                    <View style={[styles.avatar, styles.assistantAvatar]}>
+                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.bgInactive} />
+                    </View>
+                  )}
+                  <View style={[styles.chatBubble, isUser ? styles.userBubble : styles.assistantBubble]}>
+                    <Text
+                      style={[styles.chatText, isUser ? styles.userChatText : styles.assistantChatText]}
+                    >
+                      {m.text}
+                    </Text>
+                  </View>
+                  {isUser && (
+                    <View style={[styles.avatar, styles.userAvatar]}>
+                      <Ionicons name={avatarIcon(m.role, ageMode)} size={18} color={Colors.bgInactive} />
+                    </View>
+                  )}
                 </View>
               )
             })
@@ -715,12 +735,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: 24,
   },
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 8,
+  },
+  userRow: {
+    justifyContent: "flex-end",
+  },
+  assistantRow: {
+    justifyContent: "flex-start",
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  assistantAvatar: {
+    backgroundColor: Colors.accent,
+    marginRight: 8,
+  },
+  userAvatar: {
+    backgroundColor: Colors.secondary,
+    marginLeft: 8,
+  },
   chatBubble: {
-    maxWidth: "85%",
+    maxWidth: "75%",
     borderRadius: 12,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    marginBottom: 8,
   },
   userBubble: {
     alignSelf: "flex-end",
