@@ -768,11 +768,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   userBubble: {
-    alignSelf: "flex-end",
     backgroundColor: Colors.primary,
   },
   assistantBubble: {
-    alignSelf: "flex-start",
     backgroundColor: Colors.bgActive,
   },
   chatText: {
