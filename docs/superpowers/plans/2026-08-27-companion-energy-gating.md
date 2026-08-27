@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 仅 iOS 原生层（`modules/microphone-stream/ios/MicrophoneStreamModule.swift`）；Android 后补。
+- iOS 与 Android 两端原生层；Android 采样率 16kHz、数据为 ShortArray，能量计算前先归一化为 Float 复用相同常量。
 - 帧长 20ms（沿用现有 `VAD_FRAME_MS = 20`）；不改现有 3 帧触发 / 40 帧结束状态机。
 - SNR 门控阈值 12dB：`rms >= floor * 4.0` 才喂 libfvad，否则直接判 silence。
 - 底噪指数平滑：仅在 libfvad 判 silence 时更新；下降快 `alphaDown = 0.2`，上升慢 `alphaUp = 0.05`。
@@ -249,4 +249,141 @@ Read `MicrophoneStreamModule.swift`，确认：
 ```bash
 git add modules/microphone-stream/ios/MicrophoneStreamModule.swift
 git commit -m "feat: iOS 能量门控前置粗筛与自适应底噪"
+```
+
+---
+
+### Task 3: Android 集成能量门控 + 自适应底噪
+
+**Files:**
+- Modify: `modules/microphone-stream/android/src/main/java/expo/modules/microphonestream/MicrophoneStreamModule.kt`
+
+**Interfaces:**
+- Consumes: 现有 `vadHandle`/`sampleRate`/`speechActive`/`updateVadState(_:)`/读循环。
+- Produces: 新增常量 `SNR_K`/`FLOOR_ALPHA_DOWN`/`FLOOR_ALPHA_UP`/`FLOOR_INIT`/`FLOOR_CAP`/`FLOOR_MIN`；新增字段 `noiseFloor`/`graceFramesRemaining`；新增私有方法 `computeRms(_:)`/`updateNoiseFloor(_:rms:)`；读循环内加能量门控分支与宽限期。
+
+> 与 iOS（Task 2）完全对称，但：采样率 16kHz（frameLen=320）、数据为 `ShortArray`、能量计算前归一化为 Float（`x / 32768.0f`）。常量与 iOS/TS 参考完全一致。冷启动宽限期 25 帧。
+
+- [ ] **Step 1: 加能量门控常量**
+
+在 `MicrophoneStreamModule.kt` 的 `private val silenceEndFrames = 40` 之后，新增：
+
+```kotlin
+    // 能量门控 + 自适应底噪参数（RMS 幅度域，与 iOS/TS 参考一致）
+    private val snrK = 4.0f          // 12dB：rms >= floor × 4 才喂 libfvad
+    private val floorAlphaDown = 0.2f // 底噪下探（快）
+    private val floorAlphaUp = 0.05f  // 底噪上升（慢）
+    private val floorInit = 0.25f     // 冷启动保守初值
+    private val floorCap = 8.0f       // 能量上限保护：瞬态不更新底噪
+    private val floorMin = 1e-6f      // 底噪下限
+```
+
+- [ ] **Step 2: 加 noiseFloor 与 graceFramesRemaining 字段**
+
+在 `private var preRollCapacity = 0` 之后，新增：
+
+```kotlin
+    private var noiseFloor = floorInit
+    private var graceFramesRemaining = 0
+```
+
+- [ ] **Step 3: 改写读循环中的 VAD 帧处理，加入能量门控与宽限期**
+
+把现有读循环里这段（`while (offset + frameLen <= read) { ... }` 的循环体）：
+
+```kotlin
+                        // 按 20ms 帧喂 VAD（Android 采样率为 16kHz，frameLen = 320）
+                        val frameLen = sampleRate * vadFrameMs / 1000
+                        var offset = 0
+                        while (offset + frameLen <= read) {
+                            val frame = buffer.copyOfRange(offset, offset + frameLen)
+                            updateVadState(nativeVadProcess(vadHandle, frame, frameLen) == 1)
+                            offset += frameLen
+                        }
+```
+
+替换为：
+
+```kotlin
+                        // 按 20ms 帧喂 VAD（Android 采样率为 16kHz，frameLen = 320）
+                        val frameLen = sampleRate * vadFrameMs / 1000
+                        var offset = 0
+                        while (offset + frameLen <= read) {
+                            val frame = buffer.copyOfRange(offset, offset + frameLen)
+                            val rms = computeRms(frame)
+
+                            val inGrace = graceFramesRemaining > 0
+                            if (inGrace) { graceFramesRemaining -= 1 }
+
+                            if (!inGrace && rms < noiseFloor * snrK) {
+                                // 能量门控：低能量直接判 silence，跳过 libfvad，并更新底噪（快降/慢升）
+                                noiseFloor = updateNoiseFloor(noiseFloor, rms)
+                                updateVadState(false)
+                            } else {
+                                // 冷启动宽限期内，或能量够高：直喂 libfvad 精判
+                                val isSpeech = nativeVadProcess(vadHandle, frame, frameLen) == 1
+                                if (!isSpeech) {
+                                    // libfvad 判 silence 才更新底噪（含能量上限保护）
+                                    noiseFloor = updateNoiseFloor(noiseFloor, rms)
+                                }
+                                updateVadState(isSpeech)
+                            }
+                            offset += frameLen
+                        }
+```
+
+- [ ] **Step 4: 新增 computeRms 与 updateNoiseFloor 私有方法**
+
+在 `initVad` 方法之后、`updateVadState` 方法之前，新增：
+
+```kotlin
+    // Short PCM 归一化为 Float 后算 RMS（幅度域，与 iOS/TS 参考一致）
+    private fun computeRms(frame: ShortArray): Float {
+        if (frame.isEmpty()) return 0f
+        var sum = 0.0
+        for (s in frame) {
+            val x = s / 32768.0f
+            sum += (x * x).toDouble()
+        }
+        return kotlin.math.sqrt(sum / frame.size).toFloat()
+    }
+
+    private fun updateNoiseFloor(floor: Float, rms: Float): Float {
+        if (rms > floor * floorCap) return floor // 关门等瞬态不更新底噪
+        val alpha = if (rms < floor) floorAlphaDown else floorAlphaUp
+        val next = (1 - alpha) * floor + alpha * rms
+        return maxOf(next, floorMin)
+    }
+```
+
+- [ ] **Step 5: initVad 设置宽限期，stopRecording 复位状态**
+
+在 `initVad()` 里 `preRollCapacity = sampleRate * 300 / 1000` 之后，新增：
+
+```kotlin
+        graceFramesRemaining = 25 // 500ms / 20ms：冷启动宽限期，直喂 libfvad 收敛底噪
+```
+
+在 `stopRecording()` 里 `silenceStreak = 0` 之后，新增：
+
+```kotlin
+        noiseFloor = floorInit
+```
+
+- [ ] **Step 6: 读回确认**
+
+Read `MicrophoneStreamModule.kt`，确认：
+- 能量门控分支在 `nativeVadProcess` 之前；
+- 宽限期 25 帧内直喂 libfvad，之后门控才接管；
+- 底噪只在「门控判 silence」或「libfvad 判 silence」时更新；
+- speech 帧不更新 floor；
+- `@Volatile`/`readThread`/`join`、状态机阈值（3/40）、pre-roll、fallback、事件名均未被改动。
+
+> 注意：本环境无法可靠运行 gradle 编译（SDK 路径缺失）。语法正确性靠读回确认，完整编译需真机/本地 gradle 验证。
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add modules/microphone-stream/android/src/main/java/expo/modules/microphonestream/MicrophoneStreamModule.kt
+git commit -m "feat: Android 能量门控前置粗筛与自适应底噪"
 ```

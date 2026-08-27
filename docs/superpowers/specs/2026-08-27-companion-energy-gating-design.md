@@ -16,12 +16,12 @@
 ### 2.1 范围内
 
 - iOS 原生层：能量（RMS）计算 + 自适应底噪估计 + 能量门控（前置粗筛）
+- Android 原生层：同一套能量门控逻辑（16kHz、Short→Float 归一化，复用相同常量）
 - 门控逻辑与现有 libfvad 状态机（3 帧触发 / 40 帧结束）协作
 - 纯函数逻辑用文档化断言验证
 
 ### 2.2 范围外
 
-- Android 端（本次先 iOS，后补）
 - 真 VAD 语义增强（区分「孩子」vs「电视人声」）
 - 降噪（AEC/ANR）、多麦克风、波束成形
 
@@ -62,22 +62,23 @@
 
 ## 4. 组件改动
 
-### 4.1 修改 `modules/microphone-stream/ios/MicrophoneStreamModule.swift`
+### 4.1 修改 `modules/microphone-stream/ios/MicrophoneStreamModule.swift`（已实现）
 
 - 新增能量计算：每 20ms 帧算 RMS（`sqrt(Σx²/n)`，输入为 Float）
 - 新增底噪状态字段：`noiseFloor`、平滑系数常量、能量上限常量
 - 新增能量门控逻辑：在 `processVadFrames` 喂 libfvad 之前，先按 energy vs floor 判断
 - `updateVadState` 之外新增/扩展 floor 更新逻辑：仅在 libfvad 判 silence 且 energy 未超上限时更新
+- 冷启动宽限期 25 帧（~500ms）直喂 libfvad 收敛底噪
 
-### 4.2 测试文件
+### 4.2 修改 `modules/microphone-stream/android/.../MicrophoneStreamModule.kt`
 
-- 新增 `src/services/energyGating.test.example.ts`（文档化断言）：floor 更新（仅 silence 时、能量上限保护、快降慢升）、门控判定（`energy >= floor * K`）
+- 与 iOS 同一套逻辑，但采样率 16kHz（frameLen=320）、数据为 ShortArray
+- 能量计算前先将 Short 归一化为 Float（`x / 32768.0f`），复用与 iOS 完全相同的常量（SNR_K=4.0 / alphaDown=0.2 / alphaUp=0.05 / floorInit=0.25 / cap=8.0 / min=1e-6）
+- 冷启动宽限期 25 帧（`graceFramesRemaining`）直喂 libfvad
 
-## 5. 错误处理
+### 4.3 测试文件
 
-- 能量计算溢出（Android Int16 平方用 Long 累加；iOS Float 无此问题）
-- floor 收敛到 0/负值 → 夹到最小正数
-- VAD 不可用回退（`vad == nil` → 始终 emit）不参与能量门控
+- 已有 `src/services/energyGating.test.example.ts`（文档化断言），Android 复用同一套数学，无需新增
 
 ## 6. 测试
 
@@ -89,4 +90,3 @@
 - 真 VAD 语义增强（孩子 vs 电视人声）
 - 多麦克风、波束成形
 - 降噪（AEC/ANR）
-- Android 端（本次先 iOS，后补）
