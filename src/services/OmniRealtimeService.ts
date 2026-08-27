@@ -92,19 +92,27 @@ export class OmniRealtimeService {
 
       try {
         // RN 的 WebSocket 运行时支持第三个 options 参数（headers），但 TS 类型未声明，故此处断言。
-        this.socket = new (WebSocket as any)(url, null, {
+        const sock = new (WebSocket as any)(url, null, {
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "OpenAI-Beta": "realtime=v1",
           },
         }) as WebSocket
-        this.socket.onopen = () => {
+        this.socket = sock
+        // 所有回调先比对 this.socket 是否仍是本连接：disconnect() 后立即重连时，
+        // 旧 socket 的异步 onclose 会晚于新 socket 建立，若不加守卫会污染新连接的状态。
+        sock.onopen = () => {
+          if (this.socket !== sock) return
           this.connected = true
           console.log("[omni-realtime] WebSocket opened, sending session.update")
           this.sendSessionUpdate()
         }
-        this.socket.onmessage = (event) => this.onMessage(event)
-        this.socket.onerror = (event: any) => {
+        sock.onmessage = (event) => {
+          if (this.socket !== sock) return
+          this.onMessage(event)
+        }
+        sock.onerror = (event: any) => {
+          if (this.socket !== sock) return
           this.connected = false
           console.error(
             "[omni-realtime] WebSocket error event:",
@@ -119,7 +127,8 @@ export class OmniRealtimeService {
             this.rejectConnection = null
           }
         }
-        this.socket.onclose = (event) => {
+        sock.onclose = (event) => {
+          if (this.socket !== sock) return
           console.log(
             `[omni-realtime] WebSocket closed: code=${event.code} reason=${event.reason} message=${(event as any)?.message ?? "n/a"}`
           )
