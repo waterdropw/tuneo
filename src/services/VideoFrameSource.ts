@@ -8,6 +8,7 @@ import { CameraView } from "expo-camera"
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator"
 import * as FileSystem from "expo-file-system"
 import { nextFrameState, diffRatio, ADAPTIVE_DEFAULTS, FrameState } from "./adaptiveFramerate"
+import { FrameRingBuffer } from "./FrameRingBuffer"
 
 export const MAX_FRAME_BYTES = 256 * 1024
 
@@ -29,19 +30,30 @@ export class VideoFrameSource {
   private lastThumbBase64: string | null = null
   private running = false
   private busy: boolean = false
-  private frameCallback: ((base64Jpg: string) => void) | null = null
+  private frameBuffer = new FrameRingBuffer(3)
+  private lastSentThumbBase64: string | null = null
   private changeCallback: (() => void) | null = null
 
   setCameraRef(ref: RefObject<CameraView>): void {
     this.cameraRef = ref
   }
 
-  setFrameCallback(cb: (base64Jpg: string) => void): void {
-    this.frameCallback = cb
-  }
-
   setChangeCallback(cb: () => void): void {
     this.changeCallback = cb
+  }
+
+  // response 前取最新一帧；与上次发送帧做帧差初筛，无显著变化则返回 null（跳过发送）
+  takeLatestChangedFrame(): { base64Jpg: string } | null {
+    const latest = this.frameBuffer.latest()
+    if (!latest) return null
+    if (
+      this.lastSentThumbBase64 !== null &&
+      diffRatio(latest.thumbBase64, this.lastSentThumbBase64) < ADAPTIVE_DEFAULTS.changeThreshold
+    ) {
+      return null
+    }
+    this.lastSentThumbBase64 = latest.thumbBase64
+    return { base64Jpg: latest.base64Jpg }
   }
 
   start(mode: "onDemand" | "continuous"): void {
@@ -88,7 +100,7 @@ export class VideoFrameSource {
       }
       uris.push(photo.uri)
 
-      // 发送帧：320 宽 JPEG
+      // 发送帧：224 宽 JPEG
       const sendResult = await manipulateAsync(
         photo.uri,
         [{ resize: { width: TARGET_WIDTH } }],
@@ -96,22 +108,23 @@ export class VideoFrameSource {
       )
       uris.push(sendResult.uri)
 
-      if (sendResult.base64 && fitsSizeLimit(sendResult.base64)) {
-        this.frameCallback?.(sendResult.base64)
-      } else {
-        console.warn("[video-frame] Frame exceeds size limit, dropped")
-      }
-
-      // 检测帧：16×16 无损 PNG（仅用于画面变化检测，不发模型）
+      // 检测帧：16×16 无损 PNG（用于画面变化检测 + 帧差初筛，不发模型）
       const thumbResult = await manipulateAsync(
         photo.uri,
         [{ resize: { width: THUMB_SIZE, height: THUMB_SIZE } }],
         { format: SaveFormat.PNG, base64: true }
       )
       uris.push(thumbResult.uri)
-
-      // 更新状态机
       const thumbBase64 = thumbResult.base64 ?? ""
+
+      // 写入帧环形缓冲（response 前按需取最新一帧发送）
+      if (sendResult.base64 && fitsSizeLimit(sendResult.base64)) {
+        this.frameBuffer.push({ base64Jpg: sendResult.base64, thumbBase64, ts: Date.now() })
+      } else {
+        console.warn("[video-frame] Frame exceeds size limit, dropped")
+      }
+
+      // 更新状态机（相邻帧变化检测）
       const changed =
         this.lastThumbBase64 !== null &&
         diffRatio(thumbBase64, this.lastThumbBase64) >= ADAPTIVE_DEFAULTS.changeThreshold

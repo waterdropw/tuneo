@@ -235,6 +235,19 @@ export const Companion = () => {
     }, 30000)
   }
 
+  // response 前按需发最新帧：从环形缓冲取最新一帧，帧差初筛无变化则跳过
+  const sendLatestFrameIfChanged = () => {
+    const frame = videoSourceRef.current?.takeLatestChangedFrame()
+    if (frame && serviceRef.current?.isReady()) {
+      try {
+        serviceRef.current.appendImage(frame.base64Jpg)
+        imageSentRef.current += 1
+      } catch (e) {
+        console.warn("[companion] appendImage failed", e)
+      }
+    }
+  }
+
   // 10s 定时主动触发：静默聆听中让模型看当前画面，判断是否提醒（阶段一）
   const startProactive = () => {
     stopProactive()
@@ -244,6 +257,7 @@ export const Companion = () => {
         !userSpeakingRef.current &&
         Date.now() - lastInteractionRef.current > 10000
       ) {
+        sendLatestFrameIfChanged()
         try {
           serviceRef.current?.createResponse()
         } catch (e) {
@@ -401,6 +415,7 @@ export const Companion = () => {
           userSpeakingRef.current = false
           lastInteractionRef.current = Date.now()
           armRebuild()
+          sendLatestFrameIfChanged()
           try {
             service.commitAudioBuffer()
             service.createResponse()
@@ -426,28 +441,13 @@ export const Companion = () => {
       if (videoMode !== "off" && cameraPermission?.granted) {
         const videoSource = new VideoFrameSource()
         videoSource.setCameraRef(cameraRef)
-        videoSource.setFrameCallback((b64) => {
-          // 语音优先：孩子说话 / AI 回复期间暂停图片上传，避免挤占模型注意力导致积压
-          const speaking =
-            userSpeakingRef.current ||
-            statusRef.current === "responding" ||
-            (playerRef.current?.isPlaying() ?? false)
-          if (speaking) return
-          if (service.isReady()) {
-            try {
-              service.appendImage(b64)
-              imageSentRef.current += 1
-            } catch (e) {
-              console.warn("[companion] appendImage failed", e)
-            }
-          }
-        })
         videoSource.setChangeCallback(() => {
           if (
             statusRef.current === "listening" &&
             !userSpeakingRef.current &&
             Date.now() - lastInteractionRef.current > 10000
           ) {
+            sendLatestFrameIfChanged()
             try {
               service.createResponse()
             } catch (e) {
