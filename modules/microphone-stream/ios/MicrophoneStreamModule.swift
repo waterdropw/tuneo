@@ -76,11 +76,20 @@ public class MicrophoneStreamModule: Module {
           print("Configuring audioSession")
           DispatchQueue.main.async {
               do {
-                  try self.audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-                  try self.audioSession.setPreferredSampleRate(16000.0) // default sample rate 16kHz
+                  try self.audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+                  try self.audioSession.setPreferredSampleRate(TARGET_SAMPLE_RATE) // .voiceChat 锁定 48kHz，与 tap 输出一致
                   try self.audioSession.setActive(true)
 
                   let inputNode = self.audioEngine.inputNode
+
+                  // 启用系统 voice processing（AEC + 降噪 + AGC），抑制回复回声被麦克风拾取后自打断。
+                  // 必须在 engine stopped 时调用；失败则降级为不启用，维持现状不崩。
+                  do {
+                      try inputNode.setVoiceProcessingEnabled(true)
+                  } catch {
+                      print("Voice processing not available, continuing without AEC: \(error.localizedDescription)")
+                  }
+
                   // 显式指定 48kHz 单声道浮点格式，AVAudioEngine 会自动把硬件采样率重采样过来
                   let targetFormat = AVAudioFormat(
                     commonFormat: .pcmFormatFloat32,

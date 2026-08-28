@@ -144,6 +144,7 @@ export const Companion = () => {
   const proactiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastInteractionRef = useRef<number>(0)
   const userSpeakingRef = useRef<boolean>(false)
+  const suppressBargeUntilRef = useRef<number>(0)
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -297,6 +298,7 @@ export const Companion = () => {
         break
       case "audio-done":
         playerRef.current?.play()
+        suppressBargeUntilRef.current = Date.now() + 500
         setStatus("listening")
         statusRef.current = "listening"
         // 回复结束回到聆听：重新武装 30s 静音重建定时器
@@ -375,17 +377,24 @@ export const Companion = () => {
       audioSourceRef.current = audioSource
       audioSource.setSpeechCallbacks(
         () => {
-          // 孩子开口：打断进行中的回复，并取消静音重建定时器
+          // 播放起始短 holdoff：抑制回声误触发的自打断（AEC 负责根治整个播放期）
+          if (Date.now() < suppressBargeUntilRef.current) return
+          // 孩子开口：标记用户说话并取消静音重建定时器
           userSpeakingRef.current = true
           if (rebuildTimerRef.current) {
             clearTimeout(rebuildTimerRef.current)
             rebuildTimerRef.current = null
           }
-          service.cancelResponse()
-          playerRef.current?.stop()
-          playerRef.current?.reset()
-          setStatus("listening")
-          statusRef.current = "listening"
+          // 仅在「有回复内容」时才打断：AI 正在生成（responding）或正在播放音频时抢话
+          const hasReply =
+            statusRef.current === "responding" || (playerRef.current?.isPlaying() ?? false)
+          if (hasReply) {
+            service.cancelResponse()
+            playerRef.current?.stop()
+            playerRef.current?.reset()
+            setStatus("listening")
+            statusRef.current = "listening"
+          }
         },
         () => {
           // 人声结束：重新武装 30s 静音重建定时器，再提交并触发回复

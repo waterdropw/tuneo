@@ -1,8 +1,11 @@
 package expo.modules.microphonestream
 
+import android.content.Context
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
@@ -13,6 +16,7 @@ val BUF_PER_SEC = 10
 class MicrophoneStreamModule : Module() {
 
     private var audioRecord: AudioRecord? = null
+    private var aec: AcousticEchoCanceler? = null
     private var readThread: Thread? = null
     @Volatile private var isRecording = false
     private val sampleRate = 16000 // Default sample rate
@@ -89,13 +93,23 @@ class MicrophoneStreamModule : Module() {
     private fun startRecording() {
         if (isRecording) return
 
+        val context = appContext.reactContext ?: return
+        (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode =
+            AudioManager.MODE_IN_COMMUNICATION
+
         audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             bufferSize
         )
+
+        // 补充手动 AEC（null 安全：部分设备 create 返回 null 或 enabled 崩溃）
+        if (AcousticEchoCanceler.isAvailable()) {
+            aec = AcousticEchoCanceler.create(audioRecord!!.audioSessionId)
+            aec?.enabled = true
+        }
 
         isRecording = true
         audioRecord?.startRecording()
@@ -171,6 +185,14 @@ class MicrophoneStreamModule : Module() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+
+        aec?.release()
+        aec = null
+
+        appContext.reactContext?.let {
+            (it.getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode =
+                AudioManager.MODE_NORMAL
+        }
 
         // 等待读线程退出，确保其不再于 nativeVadProcess 中使用已释放的 vadHandle
         readThread?.join(1000)

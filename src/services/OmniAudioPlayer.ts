@@ -79,6 +79,10 @@ export class OmniAudioPlayer {
     this.sound = sound
   }
 
+  isPlaying(): boolean {
+    return this.sound != null
+  }
+
   stop(): void {
     if (this.sound) {
       this.sound.stop()
