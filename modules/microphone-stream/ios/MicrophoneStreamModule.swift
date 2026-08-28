@@ -33,6 +33,10 @@ public class MicrophoneStreamModule: Module {
   private let audioEngine = AVAudioEngine()
   private var audioBufferHandler: (([Float]) -> Void)?
 
+  // 播放：AVAudioPlayerNode 接入同一 engine 的 output，为 voice processing AEC 提供参考信号
+  private let playerNode = AVAudioPlayerNode()
+  private var playerNodeAttached = false
+
   // VAD 状态
   private var vad: OpaquePointer? = nil
   private var sampleRateForVad = 48000
@@ -136,6 +140,21 @@ public class MicrophoneStreamModule: Module {
                   self.sampleRateForVad = Int(TARGET_SAMPLE_RATE)
                   self.initVad()
 
+                  // 建立播放输出通路：playerNode → mainMixer → outputNode，
+                  // 使 voice processing 的 AEC 能从同一 engine 的 output 取得参考信号。
+                  if !self.playerNodeAttached {
+                      self.audioEngine.attach(self.playerNode)
+                      let playbackFormat = AVAudioFormat(
+                        commonFormat: .pcmFormatFloat32,
+                        sampleRate: TARGET_SAMPLE_RATE,
+                        channels: 1,
+                        interleaved: false
+                      )!
+                      self.audioEngine.connect(self.playerNode, to: self.audioEngine.mainMixerNode, format: playbackFormat)
+                      self.audioEngine.connect(self.audioEngine.mainMixerNode, to: self.audioEngine.outputNode, format: nil)
+                      self.playerNodeAttached = true
+                  }
+
                   try self.audioEngine.start()
               } catch {
                   print("Error configuring audio engine: \(error.localizedDescription)")
@@ -151,6 +170,21 @@ public class MicrophoneStreamModule: Module {
     Function("getSampleRate") { () -> Double in
       // tap 输出已统一重采样到 48kHz，返回该值供 JS 端重采样到 16k 使用
       return TARGET_SAMPLE_RATE
+    }
+
+    Function("playPcm") { (base64: String, sampleRate: Double) in
+      self.playPcm(base64: base64, sampleRate: sampleRate)
+    }
+
+    Function("stopPlayback") {
+      // playerNode 未 attach 到 engine 时调用 stop 会崩溃，故加保护
+      if self.playerNodeAttached {
+        self.playerNode.stop()
+      }
+    }
+
+    Function("isPlaying") { () -> Bool in
+      self.playerNodeAttached && self.playerNode.isPlaying
     }
   }
 
@@ -171,6 +205,65 @@ public class MicrophoneStreamModule: Module {
     noiseFloor = FLOOR_INIT
     recalibMin = Float.greatestFiniteMagnitude
     recalibCounter = 0
+  }
+
+  // 将 base64 编码的 16-bit PCM（小端）解码、重采样到 engine 输出采样率（48kHz），
+  // 转 Float32 后 schedule 到 playerNode，通过同一 engine 的 output 播放，
+  // 使 voice processing AEC 能拿到与录音同源的参考信号。
+  private func playPcm(base64: String, sampleRate: Double) {
+    guard let data = Data(base64Encoded: base64), data.count >= 2, data.count % 2 == 0 else {
+      print("[omni-audio] playPcm: invalid base64 or byte length")
+      return
+    }
+    let int16Samples = data.withUnsafeBytes { raw -> [Int16] in
+      Array(raw.bindMemory(to: Int16.self))
+    }
+    guard !int16Samples.isEmpty else { return }
+
+    let floats = resampleToRate(int16Samples, from: sampleRate, to: TARGET_SAMPLE_RATE)
+    guard !floats.isEmpty,
+          let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: TARGET_SAMPLE_RATE,
+            channels: 1,
+            interleaved: false
+          ) else { return }
+
+    let frameCount = AVAudioFrameCount(floats.count)
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+          let channel = buffer.floatChannelData?[0] else { return }
+    buffer.frameLength = frameCount
+    floats.withUnsafeBufferPointer { src in
+      channel.update(from: src.baseAddress!, count: floats.count)
+    }
+
+    playerNode.scheduleBuffer(buffer) {
+      print("[omni-audio] Playback finished via engine")
+    }
+    if !playerNode.isPlaying {
+      playerNode.play()
+    }
+  }
+
+  // 16-bit PCM 线性插值重采样到目标采样率，并归一化到 Float32（-1.0...1.0）
+  private func resampleToRate(_ samples: [Int16], from: Double, to: Double) -> [Float] {
+    guard from > 0, to > 0 else { return [] }
+    if from == to {
+      return samples.map { Float($0) / 32768.0 }
+    }
+    let ratio = from / to
+    let outLen = Int(Double(samples.count) / ratio)
+    guard outLen > 0 else { return [] }
+    var out = [Float](repeating: 0, count: outLen)
+    for i in 0..<outLen {
+      let pos = Double(i) * ratio
+      let i0 = min(Int(pos), samples.count - 1)
+      let i1 = min(i0 + 1, samples.count - 1)
+      let frac = Float(pos - Double(Int(pos)))
+      let v = Float(samples[i0]) * (1 - frac) + Float(samples[i1]) * frac
+      out[i] = max(-1.0, min(1.0, v / 32768.0))
+    }
+    return out
   }
 
   private func initVad() {

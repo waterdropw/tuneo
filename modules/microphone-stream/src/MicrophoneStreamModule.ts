@@ -14,6 +14,9 @@ declare class MicrophoneStreamModule extends NativeModule<MicrophoneStreamModule
   stopRecording(): void
   startRecording(): void
   getSampleRate(): number
+  playPcm(base64: string, sampleRate: number): void
+  stopPlayback(): void
+  isPlaying(): boolean
   BUF_PER_SEC: number
 }
 

@@ -1,10 +1,15 @@
 /**
  * OmniAudioPlayer
- * 累积模型返回的 PCM 音频分片，封装为 WAV 后用 react-native-sound 播放。
+ * 累积模型返回的 PCM 音频分片并播放。
+ * - iOS：走 MicrophoneStreamModule 的 AVAudioEngine output，与录音共用同一 engine，
+ *   使 voice processing AEC 能拿到参考信号（根治回声自打断）。
+ * - Android：封装为 WAV 后用 react-native-sound 播放（保持现状）。
  */
 
+import { Platform } from "react-native"
 import Sound from "react-native-sound"
 import * as FileSystem from "expo-file-system"
+import MicrophoneStreamModule from "../../modules/microphone-stream"
 import { base64ToBytes, bytesToBase64, pcm16ToWav } from "./audioCodec"
 
 const OUTPUT_SAMPLE_RATE = 24000
@@ -43,6 +48,13 @@ export class OmniAudioPlayer {
     }
     this.chunks = []
 
+    if (Platform.OS === "ios") {
+      // 走同一 AVAudioEngine 的 output，为 voice processing AEC 提供参考信号
+      MicrophoneStreamModule.playPcm(bytesToBase64(pcm), OUTPUT_SAMPLE_RATE)
+      return
+    }
+
+    // Android：保留 react-native-sound 播放路径
     const wav = pcm16ToWav(pcm, OUTPUT_SAMPLE_RATE)
     const path = `${FileSystem.cacheDirectory}companion_${Date.now()}.wav`
 
@@ -80,10 +92,17 @@ export class OmniAudioPlayer {
   }
 
   isPlaying(): boolean {
+    if (Platform.OS === "ios") {
+      return MicrophoneStreamModule.isPlaying()
+    }
     return this.sound != null
   }
 
   stop(): void {
+    if (Platform.OS === "ios") {
+      MicrophoneStreamModule.stopPlayback()
+      return
+    }
     if (this.sound) {
       this.sound.stop()
       this.sound.release()
