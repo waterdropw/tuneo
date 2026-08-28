@@ -16,9 +16,9 @@ export function fitsSizeLimit(base64: string, maxBytes: number = MAX_FRAME_BYTES
   return base64.length <= maxBytes
 }
 
-const CONTINUOUS_INTERVAL_MS = 1000
-const ON_DEMAND_INTERVAL_MS = 5000
-const TARGET_WIDTH = 320
+const CONTINUOUS_INTERVAL_MS = 5000
+const ON_DEMAND_INTERVAL_MS = 10000
+const TARGET_WIDTH = 224
 const THUMB_SIZE = 16
 
 export class VideoFrameSource {

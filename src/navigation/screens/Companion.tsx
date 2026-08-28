@@ -427,6 +427,12 @@ export const Companion = () => {
         const videoSource = new VideoFrameSource()
         videoSource.setCameraRef(cameraRef)
         videoSource.setFrameCallback((b64) => {
+          // 语音优先：孩子说话 / AI 回复期间暂停图片上传，避免挤占模型注意力导致积压
+          const speaking =
+            userSpeakingRef.current ||
+            statusRef.current === "responding" ||
+            (playerRef.current?.isPlaying() ?? false)
+          if (speaking) return
           if (service.isReady()) {
             try {
               service.appendImage(b64)
