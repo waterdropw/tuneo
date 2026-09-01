@@ -144,7 +144,7 @@ export const Companion = () => {
   const proactiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastInteractionRef = useRef<number>(0)
   const userSpeakingRef = useRef<boolean>(false)
-  const suppressBargeUntilRef = useRef<number>(0)
+  const pendingAudioRef = useRef<Int16Array[]>([])
 
   const ageOptions: MenuAction[] = AGE_MODES.map((m) => ({ id: m, title: AGE_MODE_TITLES[m] }))
   const voiceOptions: MenuAction[] = COMPANION_VOICES.map((v) => ({ id: v, title: v }))
@@ -248,6 +248,24 @@ export const Companion = () => {
     }
   }
 
+  // 将 AI 播放期间缓存的孩子语音 flush 到服务端，并提交触发回复
+  const flushAndCreate = () => {
+    const s = serviceRef.current
+    if (!s || !s.isReady()) return
+    const pending = pendingAudioRef.current
+    pendingAudioRef.current = []
+    try {
+      for (const samples of pending) {
+        s.appendAudio(samples)
+        audioSentRef.current += 1
+      }
+      s.commitAudioBuffer()
+      s.createResponse()
+    } catch (e) {
+      console.warn("[companion] flush/createResponse failed", e)
+    }
+  }
+
   // 10s 定时主动触发：静默聆听中让模型看当前画面，判断是否提醒（阶段一）
   const startProactive = () => {
     stopProactive()
@@ -312,7 +330,6 @@ export const Companion = () => {
         break
       case "audio-done":
         playerRef.current?.play()
-        suppressBargeUntilRef.current = Date.now() + 500
         setStatus("listening")
         statusRef.current = "listening"
         // 回复结束回到聆听：重新武装 30s 静音重建定时器
@@ -323,6 +340,10 @@ export const Companion = () => {
         statusRef.current = "listening"
         // 回复结束回到聆听：重新武装 30s 静音重建定时器
         armRebuild()
+        // 若 AI 播放期间缓存了孩子语音且孩子已说完，flush 触发新回复
+        if (pendingAudioRef.current.length > 0 && !userSpeakingRef.current) {
+          flushAndCreate()
+        }
         break
       case "error":
         Vibration.vibrate([0, 200, 100, 200])
@@ -391,18 +412,19 @@ export const Companion = () => {
       audioSourceRef.current = audioSource
       audioSource.setSpeechCallbacks(
         () => {
-          // 播放起始短 holdoff：抑制回声误触发的自打断（AEC 负责根治整个播放期）
-          if (Date.now() < suppressBargeUntilRef.current) return
+          // AI 播放期间孩子说话：标记在说，语音会被缓存，等播放完一起发（不打断）
+          if (playerRef.current?.isPlaying()) {
+            userSpeakingRef.current = true
+            return
+          }
           // 孩子开口：标记用户说话并取消静音重建定时器
           userSpeakingRef.current = true
           if (rebuildTimerRef.current) {
             clearTimeout(rebuildTimerRef.current)
             rebuildTimerRef.current = null
           }
-          // 仅在「有回复内容」时才打断：AI 正在生成（responding）或正在播放音频时抢话
-          const hasReply =
-            statusRef.current === "responding" || (playerRef.current?.isPlaying() ?? false)
-          if (hasReply) {
+          // 生成期间（尚未播放、无回声）：孩子真实说话，打断生成
+          if (statusRef.current === "responding") {
             service.cancelResponse()
             playerRef.current?.stop()
             playerRef.current?.reset()
@@ -411,27 +433,26 @@ export const Companion = () => {
           }
         },
         () => {
-          // 人声结束：重新武装 30s 静音重建定时器，再提交并触发回复
           userSpeakingRef.current = false
           lastInteractionRef.current = Date.now()
           armRebuild()
-          sendLatestFrameIfChanged()
-          try {
-            service.commitAudioBuffer()
-            service.createResponse()
-          } catch (e) {
-            console.warn("[companion] commit/createResponse failed", e)
-          }
+          // AI 播放中孩子说完：语音已缓存，等播放完（response-done）再 flush
+          if (playerRef.current?.isPlaying()) return
+          flushAndCreate()
         }
       )
       audioSource.startProcessing((processed) => {
-        if (processed?.data && service.isReady()) {
-          try {
-            service.appendAudio(processed.data)
-            audioSentRef.current += 1
-          } catch (e) {
-            console.warn("[companion] appendAudio failed", e)
-          }
+        if (!processed?.data || !service.isReady()) return
+        // AI 播放期间（或已有缓存待发）：缓存孩子语音，等播放完一起发
+        if (playerRef.current?.isPlaying() || pendingAudioRef.current.length > 0) {
+          pendingAudioRef.current.push(processed.data)
+          return
+        }
+        try {
+          service.appendAudio(processed.data)
+          audioSentRef.current += 1
+        } catch (e) {
+          console.warn("[companion] appendAudio failed", e)
         }
       })
 
